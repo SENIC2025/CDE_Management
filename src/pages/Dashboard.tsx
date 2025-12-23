@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProject } from '../contexts/ProjectContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { DecisionSupportService, RecommendationFlag, ChannelEffectiveness, ObjectiveDiagnostic } from '../lib/decisionSupport';
+import { OnboardingStatus, calculateOnboardingProgress } from '../lib/onboarding';
 import FlagOverrideModal from '../components/FlagOverrideModal';
 import {
   Target,
@@ -20,6 +21,7 @@ import {
   Info,
   Flag,
   Building2,
+  Rocket,
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -57,10 +59,12 @@ export default function Dashboard() {
     projectCount: 0,
     totalIssues: 0,
   });
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
 
   useEffect(() => {
     if (profile?.org_id) {
       loadDashboardData();
+      loadOnboardingStatus();
     }
   }, [profile]);
 
@@ -89,6 +93,24 @@ export default function Dashboard() {
       console.error('Error loading dashboard:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadOnboardingStatus() {
+    if (!profile?.org_id) return;
+
+    try {
+      const { data } = await supabase
+        .from('onboarding_status')
+        .select('*')
+        .eq('org_id', profile.org_id)
+        .maybeSingle();
+
+      if (data) {
+        setOnboardingStatus(data as OnboardingStatus);
+      }
+    } catch (error) {
+      console.error('Error loading onboarding status:', error);
     }
   }
 
@@ -162,6 +184,35 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {onboardingStatus && !onboardingStatus.completed_at && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+          <div className="flex items-start gap-4">
+            <Rocket size={32} className="text-blue-600 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-slate-900 mb-1">Complete Your Setup</h3>
+              <p className="text-sm text-slate-600 mb-3">
+                You're {calculateOnboardingProgress(onboardingStatus.checklist_json)}% complete. Finish onboarding to unlock the full potential of CDE Manager.
+              </p>
+              <div className="flex gap-2">
+                <Link
+                  to="/onboarding"
+                  className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition text-sm font-medium"
+                >
+                  <Rocket size={16} />
+                  Continue Setup
+                </Link>
+                <button
+                  onClick={() => setOnboardingStatus({ ...onboardingStatus, completed_at: new Date().toISOString() })}
+                  className="text-slate-600 px-4 py-2 hover:text-slate-900 text-sm"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPortfolioView && entitlements?.portfolio_dashboard_enabled ? (
         <div className="space-y-6">

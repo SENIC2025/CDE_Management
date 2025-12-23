@@ -1,7 +1,9 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useEntitlements } from '../contexts/EntitlementsContext';
 import ProjectSwitcher from './ProjectSwitcher';
+import { supabase } from '../lib/supabase';
 import {
   LayoutDashboard,
   Target,
@@ -17,6 +19,9 @@ import {
   BookOpen,
   Settings,
   Building2,
+  Rocket,
+  CreditCard,
+  Lock,
   LogOut,
   Menu,
   X,
@@ -27,28 +32,55 @@ interface LayoutProps {
   children: ReactNode;
 }
 
-const navItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/admin', label: 'Admin', icon: Settings },
-  { path: '/objectives', label: 'CDE Strategy', icon: Target },
-  { path: '/stakeholders', label: 'Stakeholders', icon: Users },
-  { path: '/messages', label: 'Messages & Value', icon: MessageSquare },
-  { path: '/assets', label: 'Results & Assets', icon: Package },
-  { path: '/activities', label: 'Activities', icon: Calendar },
-  { path: '/channels', label: 'Channels', icon: Radio },
-  { path: '/monitoring', label: 'M&E & Evidence', icon: FileCheck },
-  { path: '/uptake', label: 'Exploitation', icon: TrendingUp },
-  { path: '/compliance', label: 'Compliance', icon: Shield },
-  { path: '/reports', label: 'Reports', icon: FileText },
-  { path: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
-  { path: '/governance', label: 'Plans & Governance', icon: Building2 },
-];
-
 export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
+  const { isOrgAdmin } = useEntitlements();
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (profile?.org_id) {
+      checkOnboarding();
+    }
+  }, [profile?.org_id]);
+
+  async function checkOnboarding() {
+    if (!profile?.org_id) return;
+
+    try {
+      const { data } = await supabase
+        .from('onboarding_status')
+        .select('completed_at')
+        .eq('org_id', profile.org_id)
+        .maybeSingle();
+
+      setShowOnboarding(!data?.completed_at);
+    } catch (error) {
+      console.error('Error checking onboarding:', error);
+    }
+  }
+
+  const navItems = [
+    { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/admin', label: 'Admin', icon: Settings },
+    { path: '/objectives', label: 'CDE Strategy', icon: Target },
+    { path: '/stakeholders', label: 'Stakeholders', icon: Users },
+    { path: '/messages', label: 'Messages & Value', icon: MessageSquare },
+    { path: '/assets', label: 'Results & Assets', icon: Package },
+    { path: '/activities', label: 'Activities', icon: Calendar },
+    { path: '/channels', label: 'Channels', icon: Radio },
+    { path: '/monitoring', label: 'M&E & Evidence', icon: FileCheck },
+    { path: '/uptake', label: 'Exploitation', icon: TrendingUp },
+    { path: '/compliance', label: 'Compliance', icon: Shield },
+    { path: '/reports', label: 'Reports', icon: FileText },
+    { path: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
+    { path: '/governance', label: 'Plans & Governance', icon: Building2 },
+    ...(showOnboarding ? [{ path: '/onboarding', label: 'Setup Wizard', icon: Rocket }] : []),
+    { path: '/plans', label: 'Plan Comparison', icon: CreditCard },
+    ...(isOrgAdmin ? [{ path: '/admin/security', label: 'Security & Audit', icon: Lock }] : []),
+  ];
 
   async function handleSignOut() {
     try {

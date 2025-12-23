@@ -19,6 +19,9 @@ import Reports from './pages/Reports';
 import Knowledge from './pages/Knowledge';
 import ProjectSettings from './pages/ProjectSettings';
 import Governance from './pages/Governance';
+import Onboarding from './pages/Onboarding';
+import Plans from './pages/Plans';
+import AdminSecurity from './pages/AdminSecurity';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -188,6 +191,36 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <Governance />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Onboarding />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/plans"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Plans />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/security"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <AdminSecurity />
             </Layout>
           </ProtectedRoute>
         }

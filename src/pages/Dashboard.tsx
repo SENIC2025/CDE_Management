@@ -6,6 +6,7 @@ import { useProject } from '../contexts/ProjectContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { DecisionSupportService, RecommendationFlag, ChannelEffectiveness, ObjectiveDiagnostic } from '../lib/decisionSupport';
 import { OnboardingStatus, calculateOnboardingProgress } from '../lib/onboarding';
+import { ExportService } from '../lib/exportService';
 import FlagOverrideModal from '../components/FlagOverrideModal';
 import {
   Target,
@@ -22,6 +23,7 @@ import {
   Flag,
   Building2,
   Rocket,
+  Package,
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -60,6 +62,7 @@ export default function Dashboard() {
     totalIssues: 0,
   });
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
+  const [exportingPortfolio, setExportingPortfolio] = useState(false);
 
   useEffect(() => {
     if (profile?.org_id) {
@@ -135,6 +138,22 @@ export default function Dashboard() {
       setMedianUptakeLag(metricsData.uptake_lag_median_days);
     } catch (error) {
       console.error('Error loading decision support:', error);
+    }
+  }
+
+  async function handleExportPortfolio() {
+    if (!profile?.org_id || !entitlements?.portfolio_dashboard_enabled) return;
+
+    setExportingPortfolio(true);
+    try {
+      const accessibleProjectIds = projects.map(p => p.id);
+      await ExportService.downloadPortfolioBundle(profile.org_id, profile.id, accessibleProjectIds);
+      alert('Portfolio governance pack generated successfully! Files will download shortly.');
+    } catch (error: any) {
+      console.error('Error exporting portfolio:', error);
+      alert('Failed to export portfolio: ' + error.message);
+    } finally {
+      setExportingPortfolio(false);
     }
   }
 
@@ -217,9 +236,19 @@ export default function Dashboard() {
       {showPortfolioView && entitlements?.portfolio_dashboard_enabled ? (
         <div className="space-y-6">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Building2 size={20} className="text-blue-600" />
-              <h2 className="text-lg font-semibold text-blue-900">Organisation Portfolio</h2>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Building2 size={20} className="text-blue-600" />
+                <h2 className="text-lg font-semibold text-blue-900">Organisation Portfolio</h2>
+              </div>
+              <button
+                onClick={handleExportPortfolio}
+                disabled={exportingPortfolio || projects.length === 0}
+                className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition disabled:bg-slate-400 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                <Package size={14} />
+                {exportingPortfolio ? 'Exporting...' : 'Export Portfolio Pack'}
+              </button>
             </div>
             <p className="text-sm text-blue-700">Cross-project analytics and insights across your organisation</p>
           </div>

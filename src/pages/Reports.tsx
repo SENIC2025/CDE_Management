@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useProject } from '../contexts/ProjectContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit, Trash2, Download, FileText, Eye } from 'lucide-react';
+import { Plus, Edit, Trash2, Download, FileText, Eye, Package } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { logReportChange } from '../lib/audit';
 import ExecutiveSummaryGenerator from '../components/ExecutiveSummaryGenerator';
+import { ExportService } from '../lib/exportService';
 
 export default function Reports() {
   const { currentProject } = useProject();
@@ -16,6 +17,7 @@ export default function Reports() {
   const [showPreview, setShowPreview] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ reporting_period: '', title: '', description: '', narrative_json: '{}', status: 'draft' });
+  const [exportingBundle, setExportingBundle] = useState(false);
 
   useEffect(() => { if (currentProject) loadReports(); }, [currentProject]);
 
@@ -154,6 +156,26 @@ export default function Reports() {
     setShowPreview(reportId);
   }
 
+  async function handleExportBundle() {
+    if (!currentProject || !profile) return;
+
+    if (!permissions.canManageProject()) {
+      alert('You do not have permission to export the project bundle. This requires coordinator, cde_lead, or admin role.');
+      return;
+    }
+
+    setExportingBundle(true);
+    try {
+      await ExportService.downloadProjectBundle(currentProject.id, profile.id, currentProject.org_id);
+      alert('Project export bundle generated successfully! Files will download shortly.');
+    } catch (error: any) {
+      console.error('Error exporting project bundle:', error);
+      alert('Failed to export project bundle: ' + error.message);
+    } finally {
+      setExportingBundle(false);
+    }
+  }
+
   if (!currentProject) return <div className="text-center py-12"><p className="text-slate-600">Select a project</p></div>;
 
   return (
@@ -164,6 +186,32 @@ export default function Reports() {
       </div>
 
       <ExecutiveSummaryGenerator />
+
+      <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-6">
+        <div className="flex items-start gap-4">
+          <Package size={32} className="text-green-600 flex-shrink-0" />
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Project Export Bundle</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              Generate a complete, portable snapshot of this project including all objectives, stakeholders, activities,
+              evidence, compliance checks, and decision-support outputs. Ideal for audit, handover, or evaluator review.
+            </p>
+            <button
+              onClick={handleExportBundle}
+              disabled={exportingBundle || !permissions.canManageProject()}
+              className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition disabled:bg-slate-400 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              <Package size={16} />
+              {exportingBundle ? 'Generating Bundle...' : 'Export Project Bundle'}
+            </button>
+            {!permissions.canManageProject() && (
+              <p className="text-xs text-orange-600 mt-2">
+                Requires coordinator, cde_lead, or admin role
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b"><h2 className="text-lg font-semibold">Reports</h2></div>

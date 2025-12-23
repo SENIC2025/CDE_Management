@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { logAuditEvent } from '../lib/audit';
+import { ExportService } from '../lib/exportService';
 import {
   PlanTier,
   PlanCatalog,
@@ -26,6 +27,7 @@ import {
   Lock,
   Unlock,
   Info,
+  Package,
 } from 'lucide-react';
 
 export default function Governance() {
@@ -36,6 +38,7 @@ export default function Governance() {
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exportingPortfolio, setExportingPortfolio] = useState(false);
 
   // Plan editing state
   const [selectedPlan, setSelectedPlan] = useState<PlanTier | null>(null);
@@ -212,6 +215,22 @@ export default function Governance() {
     }
   }
 
+  async function handleExportPortfolio() {
+    if (!profile?.org_id || !entitlements?.portfolio_dashboard_enabled) return;
+
+    setExportingPortfolio(true);
+    try {
+      const accessibleProjectIds = projects.map(p => p.id);
+      await ExportService.downloadPortfolioBundle(profile.org_id, profile.id, accessibleProjectIds);
+      alert('Portfolio governance pack generated successfully! Files will download shortly.');
+    } catch (error: any) {
+      console.error('Error exporting portfolio:', error);
+      alert('Failed to export portfolio: ' + error.message);
+    } finally {
+      setExportingPortfolio(false);
+    }
+  }
+
   function resetEntitlementsToDefaults() {
     if (confirm('Reset all entitlement overrides to plan defaults?')) {
       setEditedEntitlements({});
@@ -365,6 +384,30 @@ export default function Governance() {
               </div>
             </div>
           </div>
+
+          {entitlements?.portfolio_dashboard_enabled && projects.length > 0 && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+              <div className="flex items-start gap-4">
+                <Package size={32} className="text-blue-600 flex-shrink-0" />
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">Portfolio Governance Pack</h3>
+                  <p className="text-sm text-slate-600 mb-4">
+                    Generate a management-ready governance artifact covering all {projects.length} project{projects.length !== 1 ? 's' : ''} in your organisation.
+                    Includes compliance status, active flags, projects at risk, and decision-support summaries.
+                    Ideal for steering committees, boards, and internal audits.
+                  </p>
+                  <button
+                    onClick={handleExportPortfolio}
+                    disabled={exportingPortfolio}
+                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition disabled:bg-slate-400 disabled:cursor-not-allowed text-sm font-medium"
+                  >
+                    <Package size={16} />
+                    {exportingPortfolio ? 'Generating Pack...' : 'Export Portfolio Pack'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

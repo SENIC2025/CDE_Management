@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { OrganisationProvider } from './contexts/OrganisationContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { EntitlementsProvider } from './contexts/EntitlementsContext';
 import Layout from './components/Layout';
@@ -22,6 +23,7 @@ import Governance from './pages/Governance';
 import Onboarding from './pages/Onboarding';
 import Plans from './pages/Plans';
 import AdminSecurity from './pages/AdminSecurity';
+import OrganisationSettings from './pages/OrganisationSettings';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -225,6 +227,16 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/settings/organisation"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <OrganisationSettings />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
     </Routes>
   );
 }
@@ -233,11 +245,13 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <EntitlementsProvider>
-          <ProjectProvider>
-            <AppRoutes />
-          </ProjectProvider>
-        </EntitlementsProvider>
+        <OrganisationProvider>
+          <EntitlementsProvider>
+            <ProjectProvider>
+              <AppRoutes />
+            </ProjectProvider>
+          </EntitlementsProvider>
+        </OrganisationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

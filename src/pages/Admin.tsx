@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useOrganisation } from '../contexts/OrganisationContext';
 import { useProject } from '../contexts/ProjectContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { logAuditEvent } from '../lib/audit';
@@ -20,6 +21,7 @@ const PROGRAMME_PROFILES = ['Custom', 'Horizon Europe', 'Erasmus+', 'Interreg'];
 
 export default function Admin() {
   const { profile } = useAuth();
+  const { currentOrg } = useOrganisation();
   const { refreshProjects } = useProject();
   const { service: entitlementsService } = useEntitlements();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -44,10 +46,10 @@ export default function Admin() {
   });
 
   useEffect(() => {
-    if (profile?.org_id) {
+    if (currentOrg?.id) {
       loadProjects();
     }
-  }, [profile]);
+  }, [currentOrg]);
 
   useEffect(() => {
     if (selectedProject) {
@@ -56,10 +58,12 @@ export default function Admin() {
   }, [selectedProject]);
 
   async function loadProjects() {
+    if (!currentOrg?.id) return;
+
     const { data, error } = await supabase
       .from('projects')
       .select('*')
-      .eq('org_id', profile!.org_id)
+      .eq('org_id', currentOrg.id)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -92,7 +96,7 @@ export default function Admin() {
     e.preventDefault();
 
     try {
-      if (!profile?.org_id) {
+      if (!currentOrg?.id) {
         alert('No organisation found. Please wait while your organisation is being set up, then try again.');
         return;
       }
@@ -101,16 +105,18 @@ export default function Admin() {
         const check = entitlementsService.canCreateProject(projects.length);
         if (!check.allowed) {
           alert(check.reason || 'Cannot create project');
-          await logAuditEvent(
-            profile.org_id,
-            null,
-            profile.id,
-            'project',
-            '',
-            'denied',
-            undefined,
-            { reason: check.reason, action: 'create_project' }
-          );
+          if (profile) {
+            await logAuditEvent(
+              currentOrg.id,
+              null,
+              profile.id,
+              'project',
+              '',
+              'denied',
+              undefined,
+              { reason: check.reason, action: 'create_project' }
+            );
+          }
           return;
         }
       }
@@ -119,7 +125,7 @@ export default function Admin() {
         .from('projects')
         .insert({
           ...formData,
-          org_id: profile.org_id,
+          org_id: currentOrg.id,
           reporting_periods: [],
         })
         .select()
@@ -190,7 +196,7 @@ export default function Admin() {
             <h2 className="text-lg font-semibold text-slate-900">Projects</h2>
             <button
               onClick={() => {
-                if (!profile?.org_id) {
+                if (!currentOrg?.id) {
                   alert('No organisation found. Please wait while your organisation is being set up, then try again.');
                   return;
                 }

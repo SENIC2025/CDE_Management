@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useOrganisation } from '../contexts/OrganisationContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { logAuditEvent } from '../lib/audit';
 import {
@@ -32,6 +33,7 @@ const PROGRAMME_PROFILES = ['Custom', 'Horizon Europe', 'Erasmus+', 'Interreg'];
 export default function Onboarding() {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { currentOrg } = useOrganisation();
   const { entitlements, service, planTier, governance } = useEntitlements();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,21 +64,21 @@ export default function Onboarding() {
   });
 
   useEffect(() => {
-    if (profile?.org_id) {
+    if (currentOrg?.id) {
       loadOnboardingStatus();
       loadProjects();
     }
-  }, [profile?.org_id]);
+  }, [currentOrg?.id]);
 
   async function loadOnboardingStatus() {
-    if (!profile?.org_id) return;
+    if (!currentOrg?.id || !profile?.id) return;
 
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('onboarding_status')
         .select('*')
-        .eq('org_id', profile.org_id)
+        .eq('org_id', currentOrg.id)
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -89,7 +91,7 @@ export default function Onboarding() {
         const { data: newStatus } = await supabase
           .from('onboarding_status')
           .insert({
-            org_id: profile.org_id,
+            org_id: currentOrg.id,
             created_by: profile.id,
           })
           .select()
@@ -107,12 +109,12 @@ export default function Onboarding() {
   }
 
   async function loadProjects() {
-    if (!profile?.org_id) return;
+    if (!currentOrg?.id) return;
 
     const { data } = await supabase
       .from('projects')
       .select('*')
-      .eq('org_id', profile.org_id)
+      .eq('org_id', currentOrg.id)
       .order('created_at', { ascending: false });
 
     if (data) {
@@ -148,7 +150,7 @@ export default function Onboarding() {
       });
 
       await logAuditEvent(
-        profile.org_id!,
+        currentOrg!.id,
         null,
         profile.id,
         'onboarding_status',
@@ -176,7 +178,7 @@ export default function Onboarding() {
         .from('projects')
         .insert({
           ...projectForm,
-          org_id: profile.org_id,
+          org_id: currentOrg!.id,
           reporting_periods: [],
         })
         .select()

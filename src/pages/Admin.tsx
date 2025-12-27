@@ -91,15 +91,18 @@ export default function Admin() {
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
 
-    // Check project limit entitlement
-    if (entitlementsService) {
-      const check = entitlementsService.canCreateProject(projects.length);
-      if (!check.allowed) {
-        alert(check.reason || 'Cannot create project');
-        // Log denied action
-        if (profile) {
+    try {
+      if (!profile?.org_id) {
+        alert('No organisation found. Please wait while your organisation is being set up, then try again.');
+        return;
+      }
+
+      if (entitlementsService) {
+        const check = entitlementsService.canCreateProject(projects.length);
+        if (!check.allowed) {
+          alert(check.reason || 'Cannot create project');
           await logAuditEvent(
-            profile.org_id!,
+            profile.org_id,
             null,
             profile.id,
             'project',
@@ -108,41 +111,44 @@ export default function Admin() {
             undefined,
             { reason: check.reason, action: 'create_project' }
           );
+          return;
         }
+      }
+
+      const { data, error } = await supabase
+        .from('projects')
+        .insert({
+          ...formData,
+          org_id: profile.org_id,
+          reporting_periods: [],
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating project:', error);
+        alert('Failed to create project: ' + error.message);
         return;
       }
-    }
 
-    const { data, error } = await supabase
-      .from('projects')
-      .insert({
-        ...formData,
-        org_id: profile!.org_id,
-        reporting_periods: [],
-      })
-      .select()
-      .single();
+      setShowProjectForm(false);
+      setFormData({
+        title: '',
+        description: '',
+        programme_profile: 'Custom',
+        start_date: '',
+        end_date: '',
+        eu_compliance_enabled: false,
+      });
 
-    if (error) {
-      console.error('Error creating project:', error);
-      alert('Failed to create project: ' + error.message);
-      return;
-    }
+      await Promise.all([loadProjects(), refreshProjects()]);
 
-    setShowProjectForm(false);
-    setFormData({
-      title: '',
-      description: '',
-      programme_profile: 'Custom',
-      start_date: '',
-      end_date: '',
-      eu_compliance_enabled: false,
-    });
-
-    await Promise.all([loadProjects(), refreshProjects()]);
-
-    if (data) {
-      alert(`Project "${data.title}" created successfully! You are now the coordinator.`);
+      if (data) {
+        alert(`Project "${data.title}" created successfully! You are now the coordinator.`);
+      }
+    } catch (error) {
+      console.error('Error in project creation:', error);
+      alert('An unexpected error occurred. Please try again.');
     }
   }
 
@@ -184,6 +190,10 @@ export default function Admin() {
             <h2 className="text-lg font-semibold text-slate-900">Projects</h2>
             <button
               onClick={() => {
+                if (!profile?.org_id) {
+                  alert('No organisation found. Please wait while your organisation is being set up, then try again.');
+                  return;
+                }
                 if (entitlementsService) {
                   const check = entitlementsService.canCreateProject(projects.length);
                   if (!check.allowed) {

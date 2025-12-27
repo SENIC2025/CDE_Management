@@ -62,11 +62,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (error) throw error;
-      setProfile(data);
+
+      if (data && !data.org_id) {
+        await bootstrapOrganisation(data);
+      } else {
+        setProfile(data);
+      }
     } catch (error) {
       console.error('Error loading profile:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function bootstrapOrganisation(userData: UserProfile) {
+    try {
+      const { data: orgId, error } = await supabase
+        .rpc('bootstrap_user_organisation', {
+          p_org_name: null
+        });
+
+      if (error) throw error;
+
+      const { data: updatedProfile, error: profileError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('auth_id', userData.auth_id)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+
+      setProfile(updatedProfile);
+    } catch (error) {
+      console.error('Error bootstrapping organisation:', error);
+      setProfile(userData);
     }
   }
 

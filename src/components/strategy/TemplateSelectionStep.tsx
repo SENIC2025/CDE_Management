@@ -1,7 +1,11 @@
-import { useState } from 'react';
-import { Check, Eye } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Check, Eye, Settings } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { STRATEGY_TEMPLATES, type StrategyTemplate } from '../../lib/strategyTemplates';
 import { strategyService, type CDEStrategy } from '../../lib/strategyService';
+import { templateService, type CDEStrategyTemplate, type ApplyMode } from '../../lib/templateService';
+import { useOrganisation } from '../../contexts/OrganisationContext';
+import { useEntitlements } from '../../contexts/EntitlementsContext';
 
 interface TemplateSelectionStepProps {
   strategy: CDEStrategy;
@@ -9,10 +13,41 @@ interface TemplateSelectionStepProps {
   onUpdate: () => void;
 }
 
+type TabType = 'system' | 'organisation';
+
 export default function TemplateSelectionStep({ strategy, projectId, onUpdate }: TemplateSelectionStepProps) {
+  const navigate = useNavigate();
+  const { currentOrg } = useOrganisation();
+  const { isOrgAdmin } = useEntitlements();
+  const [activeTab, setActiveTab] = useState<TabType>('system');
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(strategy.template_code);
   const [previewTemplate, setPreviewTemplate] = useState<StrategyTemplate | null>(null);
+  const [orgTemplates, setOrgTemplates] = useState<CDEStrategyTemplate[]>([]);
+  const [loadingOrgTemplates, setLoadingOrgTemplates] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [applyingOrgTemplate, setApplyingOrgTemplate] = useState<CDEStrategyTemplate | null>(null);
+  const [selectedApplyMode, setSelectedApplyMode] = useState<ApplyMode>('merge');
+
+  useEffect(() => {
+    if (currentOrg?.id) {
+      loadOrgTemplates();
+    }
+  }, [currentOrg?.id]);
+
+  const loadOrgTemplates = async () => {
+    if (!currentOrg?.id) return;
+
+    try {
+      setLoadingOrgTemplates(true);
+      const data = await templateService.listTemplates(currentOrg.id);
+      setOrgTemplates(data);
+    } catch (err) {
+      console.error('Error loading org templates:', err);
+    } finally {
+      setLoadingOrgTemplates(false);
+    }
+  };
 
   const handleApplyTemplate = async (templateCode: string) => {
     try {
@@ -22,6 +57,35 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
       onUpdate();
     } catch (err) {
       console.error('Error applying template:', err);
+      alert('Failed to apply template');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleApplyOrgTemplate = (template: CDEStrategyTemplate) => {
+    setApplyingOrgTemplate(template);
+    setShowApplyModal(true);
+  };
+
+  const confirmApplyOrgTemplate = async () => {
+    if (!applyingOrgTemplate) return;
+
+    try {
+      setApplying(true);
+      const result = await templateService.applyTemplateToProject(
+        projectId,
+        applyingOrgTemplate.template_id,
+        selectedApplyMode
+      );
+
+      alert(`Template applied successfully!\n\nObjectives added: ${result.objectives_added}\nChannels added: ${result.channels_added}\nKPIs added: ${result.kpis_added}`);
+
+      setShowApplyModal(false);
+      setApplyingOrgTemplate(null);
+      onUpdate();
+    } catch (err) {
+      console.error('Error applying org template:', err);
       alert('Failed to apply template');
     } finally {
       setApplying(false);
@@ -50,7 +114,43 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="flex items-center space-x-4 mb-6">
+        <div className="flex space-x-2 bg-gray-100 p-1 rounded-lg">
+          <button
+            onClick={() => setActiveTab('system')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'system'
+                ? 'bg-white text-gray-900 shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            System Templates
+          </button>
+          <button
+            onClick={() => setActiveTab('organisation')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'organisation'
+                ? 'bg-white text-gray-900 shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Organisation Templates
+          </button>
+        </div>
+
+        {activeTab === 'organisation' && isOrgAdmin && (
+          <button
+            onClick={() => navigate('/strategy/templates')}
+            className="flex items-center space-x-2 px-4 py-2 text-sm text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
+          >
+            <Settings className="w-4 h-4" />
+            <span>Manage Templates</span>
+          </button>
+        )}
+      </div>
+
+      {activeTab === 'system' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         {STRATEGY_TEMPLATES.map((template) => (
           <div
             key={template.template_code}
@@ -110,7 +210,70 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      )}
+
+      {activeTab === 'organisation' && (
+        <div className="mb-8">
+          {loadingOrgTemplates ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          ) : orgTemplates.length === 0 ? (
+            <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+              <p className="text-gray-500 mb-4">No organisation templates available yet.</p>
+              {isOrgAdmin && (
+                <button
+                  onClick={() => navigate('/strategy/templates')}
+                  className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>Create Template</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {orgTemplates.map((template) => {
+                const stats = templateService.getTemplateStats(template);
+
+                return (
+                  <div
+                    key={template.template_id}
+                    className="border-2 rounded-lg p-6 border-gray-200 hover:border-blue-300 hover:shadow-md transition-all"
+                  >
+                    <div className="mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">{template.name}</h3>
+                      {template.description && (
+                        <p className="text-sm text-gray-600">{template.description}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-2 mb-4">
+                      <span className="text-xs text-gray-500">{stats.objectiveCount} objectives</span>
+                      <span className="text-xs text-gray-500">{stats.channelCount} channels</span>
+                      <span className="text-xs text-gray-500">{stats.kpiCount} KPIs</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-gray-500 mb-4">
+                      <span>v{template.version}</span>
+                      <span>Updated {new Date(template.updated_at).toLocaleDateString()}</span>
+                    </div>
+
+                    <button
+                      onClick={() => handleApplyOrgTemplate(template)}
+                      disabled={applying}
+                      className="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {applying ? 'Applying...' : 'Apply Template'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {strategy.template_code && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -212,6 +375,97 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
                 {applying ? 'Applying...' : 'Apply This Template'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApplyModal && applyingOrgTemplate && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full p-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Apply Template: {applyingOrgTemplate.name}</h3>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Application Mode</label>
+              <div className="space-y-3">
+                <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                  <input
+                    type="radio"
+                    name="applyMode"
+                    value="merge"
+                    checked={selectedApplyMode === 'merge'}
+                    onChange={() => setSelectedApplyMode('merge')}
+                    className="mt-1 mr-3"
+                  />
+                  <div>
+                    <div className="font-medium text-gray-900">Merge</div>
+                    <div className="text-sm text-gray-600">
+                      Add missing objectives and channels from template without removing existing ones (recommended)
+                    </div>
+                  </div>
+                </label>
+
+                <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                  <input
+                    type="radio"
+                    name="applyMode"
+                    value="replace"
+                    checked={selectedApplyMode === 'replace'}
+                    onChange={() => setSelectedApplyMode('replace')}
+                    className="mt-1 mr-3"
+                  />
+                  <div>
+                    <div className="font-medium text-gray-900">Replace</div>
+                    <div className="text-sm text-gray-600">
+                      Remove all existing objectives and channels, then apply template structure
+                    </div>
+                  </div>
+                </label>
+
+                <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                  <input
+                    type="radio"
+                    name="applyMode"
+                    value="kpis_only"
+                    checked={selectedApplyMode === 'kpis_only'}
+                    onChange={() => setSelectedApplyMode('kpis_only')}
+                    className="mt-1 mr-3"
+                  />
+                  <div>
+                    <div className="font-medium text-gray-900">KPIs Only</div>
+                    <div className="text-sm text-gray-600">
+                      Only apply KPI bundle and indicators, keep existing objectives and channels
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-800">
+                <strong>Preview:</strong> This will add content from the template based on your selected mode.
+                You can always adjust afterwards.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowApplyModal(false);
+                  setApplyingOrgTemplate(null);
+                }}
+                disabled={applying}
+                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmApplyOrgTemplate}
+                disabled={applying}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {applying ? 'Applying...' : 'Apply Template'}
               </button>
             </div>
           </div>

@@ -30,6 +30,7 @@ import PlatformAdmin from './pages/PlatformAdmin';
 import PlatformAdminPolicy from './pages/PlatformAdminPolicy';
 import Profile from './pages/Profile';
 import IndicatorLibrary from './pages/IndicatorLibrary';
+import Strategy from './pages/Strategy';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -316,6 +317,18 @@ function AppRoutes() {
             <RequireOrg>
               <Layout>
                 <IndicatorLibrary />
+              </Layout>
+            </RequireOrg>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/strategy"
+        element={
+          <ProtectedRoute>
+            <RequireOrg>
+              <Layout>
+                <Strategy />
               </Layout>
             </RequireOrg>
           </ProtectedRoute>

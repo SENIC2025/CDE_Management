@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   User,
   Library,
+  Map,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -74,7 +75,8 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/admin', label: 'Admin', icon: Settings },
-    { path: '/objectives', label: 'CDE Strategy', icon: Target },
+    { path: '/strategy', label: 'CDE Strategy', icon: Map },
+    { path: '/objectives', label: 'Objectives', icon: Target },
     { path: '/stakeholders', label: 'Stakeholders', icon: Users },
     { path: '/messages', label: 'Messages & Value', icon: MessageSquare },
     { path: '/assets', label: 'Results & Assets', icon: Package },

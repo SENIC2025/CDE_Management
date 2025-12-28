@@ -29,6 +29,7 @@ import OrganisationSettings from './pages/OrganisationSettings';
 import PlatformAdmin from './pages/PlatformAdmin';
 import PlatformAdminPolicy from './pages/PlatformAdminPolicy';
 import Profile from './pages/Profile';
+import IndicatorLibrary from './pages/IndicatorLibrary';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -305,6 +306,18 @@ function AppRoutes() {
             <Layout>
               <PlatformAdminPolicy />
             </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/indicators"
+        element={
+          <ProtectedRoute>
+            <RequireOrg>
+              <Layout>
+                <IndicatorLibrary />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />

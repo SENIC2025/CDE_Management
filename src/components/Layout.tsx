@@ -31,6 +31,7 @@ import {
   ChevronRight,
   ShieldCheck,
   User,
+  Library,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -84,6 +85,7 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/compliance', label: 'Compliance', icon: Shield },
     { path: '/reports', label: 'Reports', icon: FileText },
     { path: '/knowledge', label: 'Knowledge Base', icon: BookOpen },
+    { path: '/indicators', label: 'Indicator Library', icon: Library },
     { path: '/settings/organisation', label: 'Organisation', icon: Building2 },
     { path: '/governance', label: 'Plans & Governance', icon: Building2 },
     ...(showOnboarding ? [{ path: '/onboarding', label: 'Setup Wizard', icon: Rocket }] : []),

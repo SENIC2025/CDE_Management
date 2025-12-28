@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useProject } from '../contexts/ProjectContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit, Trash2, TrendingUp, FileText, MessageSquare, Zap, HelpCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, TrendingUp, FileText, MessageSquare, Zap, HelpCircle, Library } from 'lucide-react';
 import SearchBar from '../components/SearchBar';
 import EvidencePicker from '../components/EvidencePicker';
+import ProjectIndicators from '../components/ProjectIndicators';
 import { usePermissions } from '../hooks/usePermissions';
 import { logIndicatorChange, logEvidenceChange } from '../lib/audit';
 import { DecisionSupportService, DerivedMetrics } from '../lib/decisionSupport';
@@ -13,7 +14,7 @@ export default function Monitoring() {
   const { currentProject } = useProject();
   const { profile } = useAuth();
   const permissions = usePermissions();
-  const [activeTab, setActiveTab] = useState<'indicators' | 'evidence' | 'surveys' | 'logs' | 'derived'>('indicators');
+  const [activeTab, setActiveTab] = useState<'library' | 'indicators' | 'evidence' | 'surveys' | 'logs' | 'derived'>('library');
   const [derivedMetrics, setDerivedMetrics] = useState<DerivedMetrics | null>(null);
   const [indicators, setIndicators] = useState<any[]>([]);
   const [evidence, setEvidence] = useState<any[]>([]);
@@ -216,15 +217,24 @@ export default function Monitoring() {
         <button onClick={() => activeTab === 'indicators' ? setShowIndicatorForm(true) : activeTab === 'evidence' ? setShowEvidenceForm(true) : activeTab === 'surveys' ? setShowSurveyForm(true) : setShowLogForm(true)} disabled={!permissions.canCreate()} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"><Plus size={20} />New</button>
       </div>
 
-      <div className="flex gap-2 border-b">
-        <button onClick={() => setActiveTab('indicators')} className={`px-4 py-2 font-medium ${activeTab === 'indicators' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Indicators</button>
-        <button onClick={() => setActiveTab('evidence')} className={`px-4 py-2 font-medium ${activeTab === 'evidence' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Evidence</button>
-        <button onClick={() => setActiveTab('surveys')} className={`px-4 py-2 font-medium ${activeTab === 'surveys' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Surveys</button>
-        <button onClick={() => setActiveTab('logs')} className={`px-4 py-2 font-medium ${activeTab === 'logs' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Qualitative Logs</button>
-        <button onClick={() => setActiveTab('derived')} className={`px-4 py-2 font-medium flex items-center gap-2 ${activeTab === 'derived' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}><Zap size={16} />Derived Metrics</button>
+      <div className="flex gap-2 border-b overflow-x-auto">
+        <button onClick={() => setActiveTab('library')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'library' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}><Library size={16} />Library Indicators</button>
+        <button onClick={() => setActiveTab('indicators')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'indicators' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Custom Indicators</button>
+        <button onClick={() => setActiveTab('evidence')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'evidence' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Evidence</button>
+        <button onClick={() => setActiveTab('surveys')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'surveys' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Surveys</button>
+        <button onClick={() => setActiveTab('logs')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'logs' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Qualitative Logs</button>
+        <button onClick={() => setActiveTab('derived')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'derived' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}><Zap size={16} />Derived Metrics</button>
       </div>
 
-      <div className="bg-slate-50 border rounded p-4"><SearchBar value={searchTerm} onChange={setSearchTerm} /></div>
+      {activeTab !== 'library' && (
+        <div className="bg-slate-50 border rounded p-4"><SearchBar value={searchTerm} onChange={setSearchTerm} /></div>
+      )}
+
+      {activeTab === 'library' && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <ProjectIndicators projectId={currentProject.id} />
+        </div>
+      )}
 
       {activeTab === 'indicators' && (
         <div className="bg-white rounded-lg shadow">

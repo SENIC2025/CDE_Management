@@ -64,9 +64,9 @@ export default function WorkspaceRecovery() {
       setShowCreateOrg(false);
       setNewOrgName('');
 
-      console.log('[Org] navigation to /dashboard');
+      console.log('[Org] navigation to /');
       setTimeout(() => {
-        navigate('/dashboard');
+        navigate('/');
       }, 300);
 
     } catch (error: any) {

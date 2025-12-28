@@ -158,8 +158,10 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   }
 
   function setCurrentOrg(orgId: string) {
+    console.log('[Org] setCurrentOrg called with orgId:', orgId);
     const org = organisations.find(o => o.id === orgId);
     if (org) {
+      console.log('[Org] Setting current org:', org.name, 'id:', org.id);
       setCurrentOrgState(org);
       localStorage.setItem('currentOrgId', orgId);
 
@@ -170,13 +172,53 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
         .eq('user_id', profile!.id)
         .maybeSingle()
         .then(({ data }) => {
-          setCurrentOrgRole(data?.role || 'viewer');
+          const role = data?.role || 'viewer';
+          console.log('[Org] User role in org:', role);
+          setCurrentOrgRole(role);
+        });
+    } else {
+      console.warn('[Org] Organisation not found in list yet, fetching from database...');
+      localStorage.setItem('currentOrgId', orgId);
+
+      supabase
+        .from('organisations')
+        .select('id, name, created_at')
+        .eq('id', orgId)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('[Org] Error fetching org:', error);
+            return;
+          }
+          if (data) {
+            console.log('[Org] Fetched org from database:', data.name);
+            setCurrentOrgState(data as Organisation);
+
+            return supabase
+              .from('organisation_members')
+              .select('role')
+              .eq('org_id', orgId)
+              .eq('user_id', profile!.id)
+              .maybeSingle();
+          }
+        })
+        .then((result) => {
+          if (result && result.data) {
+            const role = result.data.role || 'viewer';
+            console.log('[Org] User role in org:', role);
+            setCurrentOrgRole(role);
+          }
+        })
+        .catch((error) => {
+          console.error('[Org] Error in setCurrentOrg fallback:', error);
         });
     }
   }
 
   async function refreshOrganisations() {
+    console.log('[Org] refreshOrganisations called');
     await loadOrganisations();
+    console.log('[Org] refreshOrganisations complete, org count:', organisations.length);
   }
 
   async function updateOrganisationName(orgId: string, newName: string) {

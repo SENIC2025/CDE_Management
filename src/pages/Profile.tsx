@@ -105,36 +105,53 @@ export default function Profile() {
     setOrgSuccess('');
 
     try {
-      console.log('[Profile] Creating organisation:', newOrgName.trim());
-      const { data: orgId, error } = await supabase.rpc('create_organisation', {
+      console.log('[Org] create start - name:', newOrgName.trim());
+
+      const { data: rpcResponse, error } = await supabase.rpc('create_organisation', {
         p_name: newOrgName.trim()
       });
 
       if (error) {
-        console.error('[Profile] RPC error creating organisation:', error);
+        console.error('[Org] RPC error creating organisation:', error);
         throw error;
       }
 
-      console.log('[Profile] Organisation created successfully:', orgId);
+      let createdOrgId: string | null = null;
+      if (typeof rpcResponse === 'string') {
+        createdOrgId = rpcResponse;
+      } else if (rpcResponse && typeof rpcResponse === 'object') {
+        createdOrgId = (rpcResponse as any).org_id || (rpcResponse as any).id;
+      }
+
+      if (!createdOrgId) {
+        throw new Error('Organisation created but ID not returned. Please refresh the page.');
+      }
+
+      console.log('[Org] create success orgId=', createdOrgId);
+
+      console.log('[Org] Refreshing organisations...');
+      await refreshOrganisations();
+
+      console.log('[Org] Refreshing local org list...');
+      await loadOrgList();
+
+      console.log('[Org] Setting current org to:', createdOrgId);
+      setCurrentOrg(createdOrgId);
+
       setOrgSuccess('Organisation created successfully');
       setShowCreateOrg(false);
       setNewOrgName('');
 
-      // Refresh organisations and select the new one
-      await refreshOrganisations();
-      await loadOrgList();
+      console.log('[Org] navigation to /dashboard');
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 300);
 
-      if (orgId) {
-        setCurrentOrg(orgId);
-        setTimeout(() => {
-          navigate('/dashboard');
-        }, 500);
-      }
     } catch (error: any) {
-      console.error('[Profile] Exception creating organisation:', error);
+      console.error('[Org] Exception creating organisation:', error);
       const errorMessage = error?.message || error?.error_description || 'Failed to create organisation. Please try again.';
       setOrgError(errorMessage);
-      console.error('[Profile] Full error object:', JSON.stringify(error, null, 2));
+      console.error('[Org] Full error object:', JSON.stringify(error, null, 2));
     } finally {
       setCreatingOrg(false);
     }

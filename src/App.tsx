@@ -5,6 +5,7 @@ import { ProjectProvider } from './contexts/ProjectContext';
 import { EntitlementsProvider } from './contexts/EntitlementsContext';
 import Layout from './components/Layout';
 import RequireOrg from './components/RequireOrg';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
@@ -313,16 +314,18 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <OrganisationProvider>
-          <EntitlementsProvider>
-            <ProjectProvider>
-              <AppRoutes />
-            </ProjectProvider>
-          </EntitlementsProvider>
-        </OrganisationProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <OrganisationProvider>
+            <EntitlementsProvider>
+              <ProjectProvider>
+                <AppRoutes />
+              </ProjectProvider>
+            </EntitlementsProvider>
+          </OrganisationProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

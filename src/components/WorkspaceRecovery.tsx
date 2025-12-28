@@ -15,7 +15,7 @@ import {
 
 export default function WorkspaceRecovery() {
   const navigate = useNavigate();
-  const { provisioning, provisioningError, retryProvisioning } = useOrganisation();
+  const { provisioning, provisioningError, retryProvisioning, refreshOrganisations, setCurrentOrg } = useOrganisation();
   const [showCreateOrg, setShowCreateOrg] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [creatingOrg, setCreatingOrg] = useState(false);
@@ -31,25 +31,49 @@ export default function WorkspaceRecovery() {
     setCreateError('');
 
     try {
-      console.log('[WorkspaceRecovery] Creating organisation:', newOrgName.trim());
-      const { data: orgId, error } = await supabase.rpc('create_organisation', {
+      console.log('[Org] create start - name:', newOrgName.trim());
+
+      const { data: rpcResponse, error } = await supabase.rpc('create_organisation', {
         p_name: newOrgName.trim()
       });
 
       if (error) {
-        console.error('[WorkspaceRecovery] RPC error creating organisation:', error);
+        console.error('[Org] RPC error creating organisation:', error);
         throw error;
       }
 
-      console.log('[WorkspaceRecovery] Organisation created successfully:', orgId);
+      let createdOrgId: string | null = null;
+      if (typeof rpcResponse === 'string') {
+        createdOrgId = rpcResponse;
+      } else if (rpcResponse && typeof rpcResponse === 'object') {
+        createdOrgId = (rpcResponse as any).org_id || (rpcResponse as any).id;
+      }
 
-      // Force page reload to refresh organisation context
-      window.location.href = '/dashboard';
+      if (!createdOrgId) {
+        throw new Error('Organisation created but ID not returned. Please refresh the page.');
+      }
+
+      console.log('[Org] create success orgId=', createdOrgId);
+
+      console.log('[Org] Refreshing organisations...');
+      await refreshOrganisations();
+
+      console.log('[Org] Setting current org to:', createdOrgId);
+      setCurrentOrg(createdOrgId);
+
+      setShowCreateOrg(false);
+      setNewOrgName('');
+
+      console.log('[Org] navigation to /dashboard');
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 300);
+
     } catch (error: any) {
-      console.error('[WorkspaceRecovery] Exception creating organisation:', error);
+      console.error('[Org] Exception creating organisation:', error);
       const errorMessage = error?.message || error?.error_description || 'Failed to create organisation. Please try again.';
       setCreateError(errorMessage);
-      console.error('[WorkspaceRecovery] Full error object:', JSON.stringify(error, null, 2));
+      console.error('[Org] Full error object:', JSON.stringify(error, null, 2));
     } finally {
       setCreatingOrg(false);
     }

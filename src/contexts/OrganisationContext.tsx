@@ -52,10 +52,12 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   async function loadOrganisations() {
     try {
       if (!profile?.id) {
+        console.log('[OrganisationContext] No profile ID, skipping org load');
         setLoading(false);
         return;
       }
 
+      console.log('[OrganisationContext] Loading organisations for user:', profile.id);
       const { data: memberships, error } = await supabase
         .from('organisation_members')
         .select(`
@@ -75,6 +77,7 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
         ?.map((m: any) => m.organisations)
         .filter(Boolean) as Organisation[];
 
+      console.log('[OrganisationContext] Found', orgs?.length || 0, 'organisations');
       setOrganisations(orgs || []);
 
       if (orgs && orgs.length > 0) {
@@ -82,16 +85,19 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
         const savedOrg = orgs.find(o => o.id === savedOrgId);
 
         if (savedOrg) {
+          console.log('[OrganisationContext] Setting saved org:', savedOrg.name);
           setCurrentOrgInternal(savedOrg, memberships);
         } else {
+          console.log('[OrganisationContext] Setting first org:', orgs[0].name);
           localStorage.removeItem('currentOrgId');
           setCurrentOrgInternal(orgs[0], memberships);
         }
       } else {
+        console.log('[OrganisationContext] No orgs found, triggering bootstrap');
         await bootstrapOrganisation();
       }
     } catch (error) {
-      console.error('Error loading organisations:', error);
+      console.error('[OrganisationContext] Error loading organisations:', error);
     } finally {
       setLoading(false);
     }
@@ -99,6 +105,7 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
 
   async function bootstrapOrganisation() {
     try {
+      console.log('[OrganisationContext] Starting workspace provisioning...');
       setProvisioning(true);
       setProvisioningError(null);
 
@@ -108,27 +115,31 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
       if (error) {
         const errorMessage = error.message || 'Failed to create workspace';
         setProvisioningError(errorMessage);
-        console.error('Error provisioning workspace:', error);
+        console.error('[OrganisationContext] Provisioning RPC error:', error);
         setLoading(false);
         return;
       }
 
+      console.log('[OrganisationContext] Provisioning succeeded, project ID:', projectId);
       if (projectId) {
         setFirstProjectId(projectId);
       }
 
+      console.log('[OrganisationContext] Loading organisations after provisioning...');
       await loadOrganisations();
     } catch (error: any) {
       const errorMessage = error?.message || 'An unexpected error occurred while creating your workspace';
       setProvisioningError(errorMessage);
-      console.error('Error provisioning workspace:', error);
+      console.error('[OrganisationContext] Provisioning exception:', error);
       setLoading(false);
     } finally {
       setProvisioning(false);
+      console.log('[OrganisationContext] Provisioning finished');
     }
   }
 
   async function retryProvisioning() {
+    console.log('[OrganisationContext] Retry provisioning requested');
     setProvisioningError(null);
     setLoading(true);
     await bootstrapOrganisation();

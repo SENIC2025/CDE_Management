@@ -81,11 +81,15 @@ export default function RequireOrg({ children }: RequireOrgProps) {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={retryProvisioning}
-                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md transition"
+                  onClick={() => {
+                    console.log('Retry provisioning clicked');
+                    retryProvisioning();
+                  }}
+                  disabled={provisioning}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <RefreshCw size={16} />
-                  Retry Setup
+                  <RefreshCw size={16} className={provisioning ? 'animate-spin' : ''} />
+                  {provisioning ? 'Retrying...' : 'Retry Setup'}
                 </button>
                 <a
                   href="mailto:support@example.com?subject=Workspace Setup Error"
@@ -125,11 +129,15 @@ export default function RequireOrg({ children }: RequireOrgProps) {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={retryProvisioning}
-                  className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md transition"
+                  onClick={() => {
+                    console.log('Setup workspace clicked');
+                    retryProvisioning();
+                  }}
+                  disabled={provisioning}
+                  className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <RefreshCw size={16} />
-                  Setup Workspace
+                  <RefreshCw size={16} className={provisioning ? 'animate-spin' : ''} />
+                  {provisioning ? 'Setting up...' : 'Setup Workspace'}
                 </button>
                 <a
                   href="mailto:support@example.com?subject=No Organisation Access"

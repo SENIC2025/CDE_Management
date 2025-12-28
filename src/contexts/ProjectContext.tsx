@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { useOrganisation } from './OrganisationContext';
 import { Role } from '../lib/rbac';
 
 interface Project {
@@ -20,24 +21,28 @@ interface ProjectContextType {
   projects: Project[];
   userRole: Role | null;
   loading: boolean;
+  showFirstProjectToast: boolean;
   selectProject: (projectId: string) => void;
   refreshProjects: () => Promise<void>;
+  dismissFirstProjectToast: () => void;
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
+  const { currentOrg, firstProjectId, clearFirstProject } = useOrganisation();
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showFirstProjectToast, setShowFirstProjectToast] = useState(false);
 
   useEffect(() => {
-    if (profile?.org_id) {
+    if (currentOrg?.id) {
       loadProjects();
     }
-  }, [profile]);
+  }, [currentOrg?.id]);
 
   useEffect(() => {
     if (currentProject && profile) {
@@ -45,12 +50,29 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, [currentProject, profile]);
 
+  useEffect(() => {
+    if (firstProjectId && projects.length > 0) {
+      const newProject = projects.find(p => p.id === firstProjectId);
+      if (newProject) {
+        setCurrentProject(newProject);
+        localStorage.setItem('currentProjectId', firstProjectId);
+        setShowFirstProjectToast(true);
+        clearFirstProject();
+      }
+    }
+  }, [firstProjectId, projects]);
+
   async function loadProjects() {
+    if (!currentOrg?.id) {
+      setLoading(false);
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('projects')
         .select('*')
-        .eq('org_id', profile!.org_id)
+        .eq('org_id', currentOrg.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -100,8 +122,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     await loadProjects();
   }
 
+  function dismissFirstProjectToast() {
+    setShowFirstProjectToast(false);
+  }
+
   return (
-    <ProjectContext.Provider value={{ currentProject, projects, userRole, loading, selectProject, refreshProjects }}>
+    <ProjectContext.Provider value={{ currentProject, projects, userRole, loading, showFirstProjectToast, selectProject, refreshProjects, dismissFirstProjectToast }}>
       {children}
     </ProjectContext.Provider>
   );

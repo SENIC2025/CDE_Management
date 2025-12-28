@@ -1,7 +1,10 @@
 import { ReactNode, useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useOrganisation } from '../contexts/OrganisationContext';
+import { useProject } from '../contexts/ProjectContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
+import { usePlatformAdmin } from '../hooks/usePlatformAdmin';
 import ProjectSwitcher from './ProjectSwitcher';
 import { supabase } from '../lib/supabase';
 import {
@@ -26,6 +29,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -37,7 +41,10 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
+  const { provisioning } = useOrganisation();
+  const { showFirstProjectToast, dismissFirstProjectToast } = useProject();
   const { isOrgAdmin } = useEntitlements();
+  const { isPlatformAdmin } = usePlatformAdmin();
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
@@ -81,6 +88,7 @@ export default function Layout({ children }: LayoutProps) {
     ...(showOnboarding ? [{ path: '/onboarding', label: 'Setup Wizard', icon: Rocket }] : []),
     { path: '/plans', label: 'Plan Comparison', icon: CreditCard },
     ...(isOrgAdmin ? [{ path: '/admin/security', label: 'Security & Audit', icon: Lock }] : []),
+    ...(isPlatformAdmin ? [{ path: '/platform-admin', label: 'Platform Admin', icon: ShieldCheck }] : []),
   ];
 
   async function handleSignOut() {
@@ -94,6 +102,36 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {provisioning && (
+        <div className="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-8 max-w-md mx-4 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <h3 className="text-xl font-semibold text-slate-900 mb-2">Setting up your workspace...</h3>
+            <p className="text-slate-600">We're creating your organisation and first project. This will only take a moment.</p>
+          </div>
+        </div>
+      )}
+
+      {showFirstProjectToast && (
+        <div className="fixed top-4 right-4 z-50 bg-green-50 border border-green-200 rounded-lg p-4 shadow-lg max-w-md animate-slide-in">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0">
+              <Rocket size={24} className="text-green-600" />
+            </div>
+            <div className="flex-1">
+              <h4 className="font-semibold text-green-900 mb-1">Welcome to CDE Manager!</h4>
+              <p className="text-sm text-green-800">We created "Your first project" to get you started. You can rename and customize it anytime.</p>
+            </div>
+            <button
+              onClick={dismissFirstProjectToast}
+              className="flex-shrink-0 text-green-600 hover:text-green-800"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className={`fixed inset-0 bg-slate-900/50 z-40 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`} onClick={() => setSidebarOpen(false)} />
 
       <aside className={`fixed inset-y-0 left-0 w-64 bg-slate-900 text-white z-50 transform transition-transform duration-200 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>

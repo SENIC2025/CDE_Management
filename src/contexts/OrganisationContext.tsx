@@ -19,9 +19,12 @@ interface OrganisationContextType {
   currentOrg: Organisation | null;
   currentOrgRole: string | null;
   loading: boolean;
+  provisioning: boolean;
+  firstProjectId: string | null;
   setCurrentOrg: (orgId: string) => void;
   refreshOrganisations: () => Promise<void>;
   updateOrganisationName: (orgId: string, newName: string) => Promise<void>;
+  clearFirstProject: () => void;
 }
 
 const OrganisationContext = createContext<OrganisationContextType | undefined>(undefined);
@@ -32,6 +35,8 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   const [currentOrg, setCurrentOrgState] = useState<Organisation | null>(null);
   const [currentOrgRole, setCurrentOrgRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [provisioning, setProvisioning] = useState(false);
+  const [firstProjectId, setFirstProjectId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user && profile) {
@@ -90,18 +95,28 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
 
   async function bootstrapOrganisation() {
     try {
-      const { data: orgId, error } = await supabase
-        .rpc('bootstrap_user_organisation', {
-          p_org_name: null
-        });
+      setProvisioning(true);
+
+      const { data: projectId, error } = await supabase
+        .rpc('provision_first_workspace');
 
       if (error) throw error;
 
+      if (projectId) {
+        setFirstProjectId(projectId);
+      }
+
       await loadOrganisations();
     } catch (error) {
-      console.error('Error bootstrapping organisation:', error);
+      console.error('Error provisioning workspace:', error);
       setLoading(false);
+    } finally {
+      setProvisioning(false);
     }
+  }
+
+  function clearFirstProject() {
+    setFirstProjectId(null);
   }
 
   function setCurrentOrgInternal(org: Organisation, memberships: any[]) {
@@ -172,9 +187,12 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
         currentOrg,
         currentOrgRole,
         loading,
+        provisioning,
+        firstProjectId,
         setCurrentOrg,
         refreshOrganisations,
-        updateOrganisationName
+        updateOrganisationName,
+        clearFirstProject
       }}
     >
       {children}

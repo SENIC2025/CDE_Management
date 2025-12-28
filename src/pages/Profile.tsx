@@ -105,12 +105,17 @@ export default function Profile() {
     setOrgSuccess('');
 
     try {
+      console.log('[Profile] Creating organisation:', newOrgName.trim());
       const { data: orgId, error } = await supabase.rpc('create_organisation', {
         p_name: newOrgName.trim()
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Profile] RPC error creating organisation:', error);
+        throw error;
+      }
 
+      console.log('[Profile] Organisation created successfully:', orgId);
       setOrgSuccess('Organisation created successfully');
       setShowCreateOrg(false);
       setNewOrgName('');
@@ -126,8 +131,10 @@ export default function Profile() {
         }, 500);
       }
     } catch (error: any) {
-      console.error('[Profile] Error creating organisation:', error);
-      setOrgError(error.message || 'Failed to create organisation');
+      console.error('[Profile] Exception creating organisation:', error);
+      const errorMessage = error?.message || error?.error_description || 'Failed to create organisation. Please try again.';
+      setOrgError(errorMessage);
+      console.error('[Profile] Full error object:', JSON.stringify(error, null, 2));
     } finally {
       setCreatingOrg(false);
     }

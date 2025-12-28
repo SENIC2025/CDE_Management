@@ -31,20 +31,25 @@ export default function WorkspaceRecovery() {
     setCreateError('');
 
     try {
-      console.log('[WorkspaceRecovery] Creating organisation:', newOrgName);
+      console.log('[WorkspaceRecovery] Creating organisation:', newOrgName.trim());
       const { data: orgId, error } = await supabase.rpc('create_organisation', {
         p_name: newOrgName.trim()
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[WorkspaceRecovery] RPC error creating organisation:', error);
+        throw error;
+      }
 
-      console.log('[WorkspaceRecovery] Organisation created:', orgId);
+      console.log('[WorkspaceRecovery] Organisation created successfully:', orgId);
 
       // Force page reload to refresh organisation context
       window.location.href = '/dashboard';
     } catch (error: any) {
-      console.error('[WorkspaceRecovery] Error creating organisation:', error);
-      setCreateError(error.message || 'Failed to create organisation');
+      console.error('[WorkspaceRecovery] Exception creating organisation:', error);
+      const errorMessage = error?.message || error?.error_description || 'Failed to create organisation. Please try again.';
+      setCreateError(errorMessage);
+      console.error('[WorkspaceRecovery] Full error object:', JSON.stringify(error, null, 2));
     } finally {
       setCreatingOrg(false);
     }

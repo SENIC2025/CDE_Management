@@ -20,11 +20,13 @@ interface OrganisationContextType {
   currentOrgRole: string | null;
   loading: boolean;
   provisioning: boolean;
+  provisioningError: string | null;
   firstProjectId: string | null;
   setCurrentOrg: (orgId: string) => void;
   refreshOrganisations: () => Promise<void>;
   updateOrganisationName: (orgId: string, newName: string) => Promise<void>;
   clearFirstProject: () => void;
+  retryProvisioning: () => Promise<void>;
 }
 
 const OrganisationContext = createContext<OrganisationContextType | undefined>(undefined);
@@ -36,6 +38,7 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   const [currentOrgRole, setCurrentOrgRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [provisioning, setProvisioning] = useState(false);
+  const [provisioningError, setProvisioningError] = useState<string | null>(null);
   const [firstProjectId, setFirstProjectId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -97,23 +100,38 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   async function bootstrapOrganisation() {
     try {
       setProvisioning(true);
+      setProvisioningError(null);
 
       const { data: projectId, error } = await supabase
         .rpc('provision_first_workspace');
 
-      if (error) throw error;
+      if (error) {
+        const errorMessage = error.message || 'Failed to create workspace';
+        setProvisioningError(errorMessage);
+        console.error('Error provisioning workspace:', error);
+        setLoading(false);
+        return;
+      }
 
       if (projectId) {
         setFirstProjectId(projectId);
       }
 
       await loadOrganisations();
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'An unexpected error occurred while creating your workspace';
+      setProvisioningError(errorMessage);
       console.error('Error provisioning workspace:', error);
       setLoading(false);
     } finally {
       setProvisioning(false);
     }
+  }
+
+  async function retryProvisioning() {
+    setProvisioningError(null);
+    setLoading(true);
+    await bootstrapOrganisation();
   }
 
   function clearFirstProject() {
@@ -189,11 +207,13 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
         currentOrgRole,
         loading,
         provisioning,
+        provisioningError,
         firstProjectId,
         setCurrentOrg,
         refreshOrganisations,
         updateOrganisationName,
-        clearFirstProject
+        clearFirstProject,
+        retryProvisioning
       }}
     >
       {children}

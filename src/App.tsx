@@ -27,6 +27,7 @@ import AdminSecurity from './pages/AdminSecurity';
 import OrganisationSettings from './pages/OrganisationSettings';
 import PlatformAdmin from './pages/PlatformAdmin';
 import PlatformAdminPolicy from './pages/PlatformAdminPolicy';
+import Profile from './pages/Profile';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -248,6 +249,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <Plans />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Profile />
             </Layout>
           </ProtectedRoute>
         }

@@ -30,6 +30,7 @@ import {
   X,
   ChevronRight,
   ShieldCheck,
+  User,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -87,6 +88,7 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/governance', label: 'Plans & Governance', icon: Building2 },
     ...(showOnboarding ? [{ path: '/onboarding', label: 'Setup Wizard', icon: Rocket }] : []),
     { path: '/plans', label: 'Plan Comparison', icon: CreditCard },
+    { path: '/profile', label: 'Profile', icon: User },
     ...(isOrgAdmin ? [{ path: '/admin/security', label: 'Security & Audit', icon: Lock }] : []),
     ...(isPlatformAdmin ? [{ path: '/platform-admin', label: 'Platform Admin', icon: ShieldCheck }] : []),
   ];

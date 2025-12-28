@@ -4,6 +4,7 @@ import { OrganisationProvider } from './contexts/OrganisationContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { EntitlementsProvider } from './contexts/EntitlementsContext';
 import Layout from './components/Layout';
+import RequireOrg from './components/RequireOrg';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
@@ -25,6 +26,7 @@ import Plans from './pages/Plans';
 import AdminSecurity from './pages/AdminSecurity';
 import OrganisationSettings from './pages/OrganisationSettings';
 import PlatformAdmin from './pages/PlatformAdmin';
+import PlatformAdminPolicy from './pages/PlatformAdminPolicy';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -52,9 +54,11 @@ function AppRoutes() {
         path="/"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Dashboard />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -62,9 +66,11 @@ function AppRoutes() {
         path="/admin"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Admin />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Admin />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -72,9 +78,11 @@ function AppRoutes() {
         path="/objectives"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Objectives />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Objectives />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -82,9 +90,11 @@ function AppRoutes() {
         path="/stakeholders"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Stakeholders />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Stakeholders />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -92,9 +102,11 @@ function AppRoutes() {
         path="/messages"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Messages />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Messages />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -102,9 +114,11 @@ function AppRoutes() {
         path="/assets"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Assets />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Assets />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -112,9 +126,11 @@ function AppRoutes() {
         path="/activities"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Activities />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Activities />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -122,9 +138,11 @@ function AppRoutes() {
         path="/channels"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Channels />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Channels />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -132,9 +150,11 @@ function AppRoutes() {
         path="/monitoring"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Monitoring />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Monitoring />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -142,9 +162,11 @@ function AppRoutes() {
         path="/uptake"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Uptake />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Uptake />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -152,9 +174,11 @@ function AppRoutes() {
         path="/compliance"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Compliance />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Compliance />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -162,9 +186,11 @@ function AppRoutes() {
         path="/reports"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Reports />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Reports />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -172,9 +198,11 @@ function AppRoutes() {
         path="/knowledge"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Knowledge />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Knowledge />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -182,9 +210,11 @@ function AppRoutes() {
         path="/settings"
         element={
           <ProtectedRoute>
-            <Layout>
-              <ProjectSettings />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <ProjectSettings />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -192,9 +222,11 @@ function AppRoutes() {
         path="/governance"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Governance />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Governance />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -202,9 +234,11 @@ function AppRoutes() {
         path="/onboarding"
         element={
           <ProtectedRoute>
-            <Layout>
-              <Onboarding />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <Onboarding />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -222,9 +256,11 @@ function AppRoutes() {
         path="/admin/security"
         element={
           <ProtectedRoute>
-            <Layout>
-              <AdminSecurity />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <AdminSecurity />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -232,9 +268,11 @@ function AppRoutes() {
         path="/settings/organisation"
         element={
           <ProtectedRoute>
-            <Layout>
-              <OrganisationSettings />
-            </Layout>
+            <RequireOrg>
+              <Layout>
+                <OrganisationSettings />
+              </Layout>
+            </RequireOrg>
           </ProtectedRoute>
         }
       />
@@ -244,6 +282,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <PlatformAdmin />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/platform-admin/policy"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <PlatformAdminPolicy />
             </Layout>
           </ProtectedRoute>
         }

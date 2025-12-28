@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Building2, FolderOpen, FileText, Shield, Download, AlertCircle } from 'lucide-react';
+import { Building2, FolderOpen, FileText, Shield, Download, AlertCircle, Package, BookOpen } from 'lucide-react';
 
 type TabType = 'organisations' | 'projects' | 'audit';
 
@@ -50,6 +51,10 @@ export default function PlatformAdmin() {
   const [entityTypeFilter, setEntityTypeFilter] = useState<string>('');
   const [actionFilter, setActionFilter] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('');
+
+  const [showExportConfirm, setShowExportConfirm] = useState(false);
+  const [exportingBundle, setExportingBundle] = useState(false);
+  const [selectedOrgForBundle, setSelectedOrgForBundle] = useState<string | null>(null);
 
   useEffect(() => {
     checkPlatformAdmin();
@@ -145,19 +150,23 @@ export default function PlatformAdmin() {
   function exportData() {
     let dataToExport: any[] = [];
     let filename = '';
+    let exportAction = '';
 
     switch (activeTab) {
       case 'organisations':
         dataToExport = orgSummary;
         filename = 'organisations-export.json';
+        exportAction = 'export_org_summary';
         break;
       case 'projects':
         dataToExport = projectSummary;
         filename = 'projects-export.json';
+        exportAction = 'export_project_summary';
         break;
       case 'audit':
         dataToExport = auditEvents;
         filename = 'audit-events-export.json';
+        exportAction = 'export_audit_events';
         break;
     }
 
@@ -168,6 +177,51 @@ export default function PlatformAdmin() {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+
+    logPlatformAdminAction(exportAction, {
+      record_count: dataToExport.length,
+      filters: {
+        org_id: selectedOrgFilter || null,
+        entity_type: entityTypeFilter || null,
+        action: actionFilter || null,
+        date: dateFilter || null
+      }
+    });
+  }
+
+  async function exportSupportBundle(orgId: string) {
+    if (exportingBundle) return;
+
+    setExportingBundle(true);
+    try {
+      const { data, error } = await supabase.rpc('get_org_support_bundle', {
+        p_org_id: orgId,
+        p_date_from: dateFilter ? new Date(dateFilter).toISOString() : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        p_date_to: new Date().toISOString()
+      });
+
+      if (error) throw error;
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `support_bundle_${orgId}_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setShowExportConfirm(false);
+      setSelectedOrgForBundle(null);
+    } catch (error) {
+      console.error('Error exporting support bundle:', error);
+      alert('Failed to export support bundle. Please try again.');
+    } finally {
+      setExportingBundle(false);
+    }
+  }
+
+  async function logPlatformAdminAction(action: string, metadata: any) {
+    console.log('Platform admin action logged:', action, metadata);
   }
 
   if (loading && isPlatformAdmin === null) {
@@ -196,11 +250,20 @@ export default function PlatformAdmin() {
   return (
     <div className="space-y-6">
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <div className="flex items-center gap-2">
-          <Shield size={20} className="text-blue-600" />
-          <p className="text-blue-800 font-medium">
-            Platform Admin Mode Active - Cross-organisation access enabled
-          </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield size={20} className="text-blue-600" />
+            <p className="text-blue-800 font-medium">
+              Platform Admin Mode Active (Read-only) - All actions are logged
+            </p>
+          </div>
+          <Link
+            to="/platform-admin/policy"
+            className="flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
+          >
+            <BookOpen size={16} />
+            View Policy
+          </Link>
         </div>
       </div>
 
@@ -330,6 +393,7 @@ export default function PlatformAdmin() {
                         <th className="text-left p-3 text-sm font-semibold text-slate-700">Users</th>
                         <th className="text-left p-3 text-sm font-semibold text-slate-700">Created</th>
                         <th className="text-left p-3 text-sm font-semibold text-slate-700">Last Activity</th>
+                        <th className="text-left p-3 text-sm font-semibold text-slate-700">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -353,6 +417,18 @@ export default function PlatformAdmin() {
                           </td>
                           <td className="p-3 text-sm text-slate-600">
                             {org.last_activity ? new Date(org.last_activity).toLocaleDateString() : 'N/A'}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              onClick={() => {
+                                setSelectedOrgForBundle(org.org_id);
+                                setShowExportConfirm(true);
+                              }}
+                              className="flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
+                            >
+                              <Package size={14} />
+                              Bundle
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -460,6 +536,69 @@ export default function PlatformAdmin() {
           )}
         </div>
       </div>
+
+      {showExportConfirm && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Package size={20} className="text-blue-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-900">Export Support Bundle</h3>
+                <p className="text-sm text-slate-600">Org ID: {selectedOrgForBundle}</p>
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
+              <p className="text-sm text-yellow-800">
+                This export is logged and intended for support/incident response only.
+                The bundle contains redacted metadata and excludes sensitive content.
+              </p>
+            </div>
+
+            <div className="text-sm text-slate-700 mb-4">
+              <p className="font-medium mb-2">The bundle will include:</p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>Organisation and project metadata</li>
+                <li>Compliance status summaries</li>
+                <li>Decision flag counts</li>
+                <li>Audit event metadata (last 30 days)</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowExportConfirm(false);
+                  setSelectedOrgForBundle(null);
+                }}
+                disabled={exportingBundle}
+                className="flex-1 px-4 py-2 border border-slate-300 rounded-md text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => selectedOrgForBundle && exportSupportBundle(selectedOrgForBundle)}
+                disabled={exportingBundle}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {exportingBundle ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Exporting...
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} />
+                    Export Bundle
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -81,6 +81,7 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
         if (savedOrg) {
           setCurrentOrgInternal(savedOrg, memberships);
         } else {
+          localStorage.removeItem('currentOrgId');
           setCurrentOrgInternal(orgs[0], memberships);
         }
       } else {

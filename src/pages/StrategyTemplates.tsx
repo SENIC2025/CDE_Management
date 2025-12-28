@@ -21,16 +21,19 @@ export default function StrategyTemplates() {
   }, [currentOrg?.id]);
 
   const loadTemplates = async () => {
-    if (!currentOrg?.id) return;
+    if (!currentOrg?.id) {
+      setError('No organisation selected');
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
       const data = await templateService.listTemplates(currentOrg.id);
       setTemplates(data);
-    } catch (err) {
-      console.error('Error loading templates:', err);
-      setError('Failed to load templates');
+    } catch (err: any) {
+      console.error('[Templates] Error loading templates:', err);
+      setError(err?.message || 'Failed to load templates. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -115,9 +118,19 @@ export default function StrategyTemplates() {
       </div>
 
       {error && (
-        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-2">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-red-800">{error}</div>
+        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-start space-x-2">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="text-sm text-red-800 mb-2">{error}</div>
+              <button
+                onClick={() => loadTemplates()}
+                className="text-sm text-red-700 font-medium hover:text-red-800 underline"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

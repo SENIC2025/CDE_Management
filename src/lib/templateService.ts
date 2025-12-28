@@ -18,13 +18,34 @@ export interface StrategyTemplateChannel {
   linked_objective_ids: string[];
 }
 
+export type FocusEmphasis = 'communication' | 'dissemination' | 'exploitation' | 'balanced';
+
+export const FOCUS_EMPHASIS_OPTIONS: Array<{ value: FocusEmphasis; label: string; description: string }> = [
+  { value: 'communication', label: 'Communication', description: 'Focus on dialogue and engagement' },
+  { value: 'dissemination', label: 'Dissemination', description: 'Focus on spreading information widely' },
+  { value: 'exploitation', label: 'Exploitation', description: 'Focus on impact and uptake' },
+  { value: 'balanced', label: 'Balanced', description: 'Equal emphasis on C/D/E' }
+];
+
+export const TARGET_AUDIENCES = [
+  'policymakers',
+  'practitioners',
+  'researchers',
+  'industry',
+  'civil_society',
+  'public',
+  'consortium'
+] as const;
+
+export type TargetAudience = typeof TARGET_AUDIENCES[number];
+
 export interface StrategyTemplateJSON {
   focus?: {
-    emphasis?: string[];
-    target_audiences?: string[];
+    emphasis?: FocusEmphasis;
+    target_audiences?: TargetAudience[];
     key_results?: string[];
-    assumptions?: string[];
-    constraints?: string[];
+    assumptions?: string;
+    constraints?: string;
   };
   objectives?: StrategyTemplateObjective[];
   channels?: StrategyTemplateChannel[];
@@ -184,6 +205,14 @@ export class TemplateService {
 
   static validateTemplateJson(templateJson: StrategyTemplateJSON): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
+
+    if (!templateJson.focus?.emphasis) {
+      errors.push('Focus emphasis is required (communication, dissemination, exploitation, or balanced)');
+    }
+
+    if (!templateJson.focus?.target_audiences || templateJson.focus.target_audiences.length === 0) {
+      errors.push('At least one target audience is required');
+    }
 
     if (templateJson.objectives) {
       for (let i = 0; i < templateJson.objectives.length; i++) {

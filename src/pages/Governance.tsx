@@ -95,39 +95,53 @@ export default function Governance() {
 
     setSaving(true);
     try {
-      const { data: existingPlan } = await supabase
+      const { data: existingPlan, error: fetchError } = await supabase
         .from('organisation_plans')
         .select('*')
         .eq('org_id', profile.org_id!)
-        .single();
+        .eq('status', 'active')
+        .maybeSingle();
 
-      if (existingPlan) {
-        await supabase
-          .from('organisation_plans')
-          .update({
-            plan_tier: selectedPlan,
-            updated_by: profile.id,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingPlan.id);
-
-        await logAuditEvent(
-          profile.org_id!,
-          null,
-          profile.id,
-          'organisation_plan',
-          existingPlan.id,
-          'update',
-          { plan_tier: existingPlan.plan_tier },
-          { plan_tier: selectedPlan }
-        );
+      if (fetchError) {
+        console.error('[Governance] Error fetching plan:', fetchError);
+        throw fetchError;
       }
+
+      if (!existingPlan) {
+        alert('No active plan found. Please contact support.');
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('organisation_plans')
+        .update({
+          plan_tier: selectedPlan,
+          updated_by: profile.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingPlan.id);
+
+      if (updateError) {
+        console.error('[Governance] Error updating plan:', updateError);
+        throw updateError;
+      }
+
+      await logAuditEvent(
+        profile.org_id!,
+        null,
+        profile.id,
+        'organisation_plan',
+        existingPlan.id,
+        'update',
+        { plan_tier: existingPlan.plan_tier },
+        { plan_tier: selectedPlan }
+      );
 
       await reload();
       setShowPlanConfirm(false);
       alert('Plan updated successfully');
     } catch (error) {
-      console.error('Error updating plan:', error);
+      console.error('[Governance] Error updating plan:', error);
       alert('Failed to update plan');
     } finally {
       setSaving(false);
@@ -139,38 +153,52 @@ export default function Governance() {
 
     setSaving(true);
     try {
-      const { data: existingPlan } = await supabase
+      const { data: existingPlan, error: fetchError } = await supabase
         .from('organisation_plans')
         .select('*')
         .eq('org_id', profile.org_id!)
-        .single();
+        .eq('status', 'active')
+        .maybeSingle();
 
-      if (existingPlan) {
-        await supabase
-          .from('organisation_plans')
-          .update({
-            entitlements_json: editedEntitlements,
-            updated_by: profile.id,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingPlan.id);
-
-        await logAuditEvent(
-          profile.org_id!,
-          null,
-          profile.id,
-          'organisation_plan',
-          existingPlan.id,
-          'update',
-          { entitlements_json: existingPlan.entitlements_json },
-          { entitlements_json: editedEntitlements }
-        );
+      if (fetchError) {
+        console.error('[Governance] Error fetching plan:', fetchError);
+        throw fetchError;
       }
+
+      if (!existingPlan) {
+        alert('No active plan found. Please contact support.');
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('organisation_plans')
+        .update({
+          entitlements_json: editedEntitlements,
+          updated_by: profile.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingPlan.id);
+
+      if (updateError) {
+        console.error('[Governance] Error updating entitlements:', updateError);
+        throw updateError;
+      }
+
+      await logAuditEvent(
+        profile.org_id!,
+        null,
+        profile.id,
+        'organisation_plan',
+        existingPlan.id,
+        'update',
+        { entitlements_json: existingPlan.entitlements_json },
+        { entitlements_json: editedEntitlements }
+      );
 
       await reload();
       alert('Entitlements updated successfully');
     } catch (error) {
-      console.error('Error updating entitlements:', error);
+      console.error('[Governance] Error updating entitlements:', error);
       alert('Failed to update entitlements');
     } finally {
       setSaving(false);

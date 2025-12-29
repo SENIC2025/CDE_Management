@@ -64,16 +64,22 @@ export function EntitlementsProvider({ children }: EntitlementsProviderProps) {
     }
 
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('organisation_members')
         .select('role')
         .eq('org_id', profile.org_id)
         .eq('user_id', profile.id)
-        .single();
+        .maybeSingle();
+
+      if (error) {
+        console.error('[Entitlements] Error checking org admin status:', error);
+        setIsOrgAdmin(false);
+        return;
+      }
 
       setIsOrgAdmin(data?.role === 'admin');
     } catch (error) {
-      console.error('Error checking org admin status:', error);
+      console.error('[Entitlements] Error checking org admin status:', error);
       setIsOrgAdmin(false);
     }
   }
@@ -83,58 +89,55 @@ export function EntitlementsProvider({ children }: EntitlementsProviderProps) {
 
     setLoading(true);
     try {
-      // Load organisation plan
-      const { data: planData, error: planError } = await supabase
-        .from('organisation_plans')
-        .select('*')
-        .eq('org_id', profile.org_id)
-        .single();
+      // Load effective entitlements via secure RPC
+      const { data: entitlementsData, error: entitlementsError } = await supabase
+        .rpc('get_effective_entitlements', { p_org_id: profile.org_id });
 
-      if (planError && planError.code !== 'PGRST116') {
-        // PGRST116 = no rows returned
-        throw planError;
+      if (entitlementsError) {
+        console.error('[Entitlements] Error loading entitlements via RPC:', entitlementsError);
+        throw entitlementsError;
       }
 
-      // If no plan exists, create default project plan
-      if (!planData) {
-        await initializeDefaultPlan();
-        await loadEntitlements(); // Reload
-        return;
-      }
+      // Parse entitlements
+      const effectiveEntitlements = entitlementsData as Entitlements;
 
-      const plan = planData as OrganisationPlan;
-      const effectiveEntitlements = getEffectiveEntitlements(
-        plan.plan_tier,
-        plan.entitlements_json || {}
-      );
+      // Determine plan tier from entitlements (or default to project)
+      let detectedTier: PlanTier = 'project';
+      if (effectiveEntitlements.max_projects === null) {
+        detectedTier = 'organisation';
+      } else if (effectiveEntitlements.max_projects > 1) {
+        detectedTier = 'portfolio';
+      }
 
       setEntitlements(effectiveEntitlements);
-      setPlanTier(plan.plan_tier);
-      setPlanStatus(plan.status);
+      setPlanTier(detectedTier);
+      setPlanStatus('active');
 
       // Create service
       const entService = new EntitlementsService(
         effectiveEntitlements,
-        plan.plan_tier,
-        plan.status
+        detectedTier,
+        'active'
       );
       setService(entService);
 
-      // Load governance settings
-      const { data: govData } = await supabase
+      // Load governance settings (use maybeSingle)
+      const { data: govData, error: govError } = await supabase
         .from('organisation_governance_settings')
         .select('*')
         .eq('org_id', profile.org_id)
-        .single();
+        .maybeSingle();
 
-      if (govData) {
+      if (govError) {
+        console.error('[Entitlements] Error loading governance settings:', govError);
+      } else if (govData) {
         setGovernance(govData as GovernanceSettings);
       } else {
         // Create default governance settings
         await initializeDefaultGovernance();
       }
     } catch (error) {
-      console.error('Error loading entitlements:', error);
+      console.error('[Entitlements] Error loading entitlements:', error);
       // Set default values on error
       const defaultEntitlements = DEFAULT_ENTITLEMENTS.project;
       setEntitlements(defaultEntitlements);
@@ -146,27 +149,11 @@ export function EntitlementsProvider({ children }: EntitlementsProviderProps) {
     }
   }
 
-  async function initializeDefaultPlan() {
-    if (!profile?.org_id || !profile?.id) return;
-
-    try {
-      await supabase.from('organisation_plans').insert({
-        org_id: profile.org_id,
-        plan_tier: 'project',
-        status: 'active',
-        entitlements_json: {},
-        created_by: profile.id,
-      });
-    } catch (error) {
-      console.error('Error initializing default plan:', error);
-    }
-  }
-
   async function initializeDefaultGovernance() {
     if (!profile?.org_id || !profile?.id) return;
 
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('organisation_governance_settings')
         .insert({
           org_id: profile.org_id,
@@ -179,13 +166,18 @@ export function EntitlementsProvider({ children }: EntitlementsProviderProps) {
           created_by: profile.id,
         })
         .select()
-        .single();
+        .maybeSingle();
+
+      if (error) {
+        console.error('[Entitlements] Error initializing default governance:', error);
+        return;
+      }
 
       if (data) {
         setGovernance(data as GovernanceSettings);
       }
     } catch (error) {
-      console.error('Error initializing default governance:', error);
+      console.error('[Entitlements] Error initializing default governance:', error);
     }
   }
 

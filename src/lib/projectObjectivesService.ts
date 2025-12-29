@@ -73,50 +73,28 @@ export class ProjectObjectivesService {
     objectiveLibId: string,
     customization: ObjectiveCustomization
   ): Promise<string> {
-    const libraryObj = await objectiveLibraryService.getObjectiveById(objectiveLibId);
+    // Use secure RPC to create objective with proper permissions and profile handling
+    const { data: objectiveId, error } = await supabase
+      .rpc('create_project_objective_from_library', {
+        p_project_id: projectId,
+        p_objective_lib_id: objectiveLibId,
+        p_priority: customization.priority,
+        p_stakeholder_types: customization.stakeholder_types,
+        p_time_horizon: customization.time_horizon,
+        p_notes: customization.notes || null,
+        p_source: 'library'
+      });
 
-    if (!libraryObj) {
-      throw new Error('Library objective not found');
+    if (error) {
+      console.error('[Objectives] Error creating objective via RPC:', error);
+      throw new Error(error.message || 'Failed to create objective');
     }
 
-    const { data: existingCheck } = await supabase
-      .from('project_objectives')
-      .select('objective_id')
-      .eq('project_id', projectId)
-      .eq('objective_lib_id', objectiveLibId)
-      .maybeSingle();
-
-    if (existingCheck) {
-      throw new Error('This objective has already been added to the project');
+    if (!objectiveId) {
+      throw new Error('Failed to create objective: no ID returned');
     }
 
-    const { data: userId } = await supabase
-      .from('users')
-      .select('id')
-      .eq('auth_id', (await supabase.auth.getUser()).data.user?.id)
-      .maybeSingle();
-
-    const { data, error } = await supabase
-      .from('project_objectives')
-      .insert({
-        project_id: projectId,
-        objective_lib_id: objectiveLibId,
-        title: libraryObj.title,
-        description: libraryObj.description,
-        domain: libraryObj.domain,
-        outcome_type: libraryObj.outcome_type,
-        priority: customization.priority,
-        stakeholder_types: customization.stakeholder_types,
-        time_horizon: customization.time_horizon,
-        notes: customization.notes || null,
-        source: 'library',
-        created_by: userId?.id || null
-      })
-      .select('objective_id')
-      .single();
-
-    if (error) throw error;
-    return data.objective_id;
+    return objectiveId;
   }
 
   static async updateObjective(

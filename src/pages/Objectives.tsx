@@ -1,42 +1,24 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { Plus, Target, AlertCircle, TrendingUp, Activity, RefreshCw } from 'lucide-react';
 import { useProject } from '../contexts/ProjectContext';
-import { Plus, Edit, Trash2, ChevronRight, ChevronDown, GitBranch } from 'lucide-react';
+import { projectObjectivesService, type ProjectObjective } from '../lib/projectObjectivesService';
 import SearchBar from '../components/SearchBar';
-import FilterPanel from '../components/FilterPanel';
+import AddObjectiveModal from '../components/objectives/AddObjectiveModal';
+import ObjectiveEditPanel from '../components/objectives/ObjectiveEditPanel';
+import ObjectiveCard from '../components/objectives/ObjectiveCard';
 
-interface Objective {
-  id: string;
-  title: string;
-  domain: string;
-  level: string;
-  description: string;
-  parent_id: string | null;
-  status: string;
-  version: number;
-}
-
-export default function Objectives() {
+export default function ObjectivesNew() {
   const { currentProject } = useProject();
-  const [objectives, setObjectives] = useState<Objective[]>([]);
+  const [objectives, setObjectives] = useState<ProjectObjective[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [domainFilter, setDomainFilter] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [formData, setFormData] = useState({
-    parent_id: '',
-    domain: 'Communication',
-    level: 'general',
-    title: '',
-    description: '',
-    smart_specific: '',
-    smart_measurable: '',
-    risks: '',
-    assumptions: '',
-    status: 'draft',
-  });
-  const [changeRationale, setChangeRationale] = useState('');
+  const [domainFilter, setDomainFilter] = useState<string>('');
+  const [priorityFilter, setPriorityFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingObjective, setEditingObjective] = useState<ProjectObjective | null>(null);
+  const [refreshingHealth, setRefreshingHealth] = useState(false);
 
   useEffect(() => {
     if (currentProject) {
@@ -44,153 +26,300 @@ export default function Objectives() {
     }
   }, [currentProject]);
 
-  async function loadObjectives() {
-    const { data } = await supabase
-      .from('cde_objectives')
-      .select('*')
-      .eq('project_id', currentProject!.id)
-      .order('created_at', { ascending: true });
+  const loadObjectives = async () => {
+    if (!currentProject) return;
 
-    setObjectives(data || []);
-  }
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await projectObjectivesService.listObjectives(currentProject.id);
+      setObjectives(data);
+    } catch (err: any) {
+      console.error('[Objectives] Error loading objectives:', err);
+      setError(err?.message || 'Failed to load objectives');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  const handleRefreshHealth = async () => {
+    if (!currentProject) return;
 
-    if (editingId) {
-      const oldObj = objectives.find(o => o.id === editingId);
-      await supabase.from('objective_versions').insert({
-        objective_id: editingId,
-        version_no: oldObj!.version,
-        change_rationale: changeRationale,
-        snapshot_json: oldObj,
-      });
-      await supabase.from('cde_objectives').update({ ...formData, version: (oldObj!.version || 1) + 1 }).eq('id', editingId);
-    } else {
-      await supabase.from('cde_objectives').insert({ ...formData, project_id: currentProject!.id, version: 1 });
+    try {
+      setRefreshingHealth(true);
+      await projectObjectivesService.computeAllObjectivesHealth(currentProject.id);
+      await loadObjectives();
+    } catch (err: any) {
+      console.error('[Objectives] Error refreshing health:', err);
+      alert('Failed to refresh objective health');
+    } finally {
+      setRefreshingHealth(false);
+    }
+  };
+
+  const handleDelete = async (objectiveId: string) => {
+    if (!confirm('Are you sure you want to delete this objective?')) return;
+
+    try {
+      await projectObjectivesService.deleteObjective(objectiveId);
+      await loadObjectives();
+    } catch (err: any) {
+      console.error('[Objectives] Error deleting objective:', err);
+      alert('Failed to delete objective');
+    }
+  };
+
+  const handleApplyKPIs = async (objectiveId: string) => {
+    if (!currentProject) return;
+
+    try {
+      const result = await projectObjectivesService.applyKPISuggestions(currentProject.id, objectiveId);
+
+      const message = result.bundle_applied
+        ? `Applied KPI bundle and ${result.kpis_added} additional indicators`
+        : `Applied ${result.kpis_added} suggested indicators`;
+
+      const skipMessage = result.kpis_skipped > 0
+        ? ` (${result.kpis_skipped} already existed)`
+        : '';
+
+      alert(message + skipMessage);
+      await loadObjectives();
+    } catch (err: any) {
+      console.error('[Objectives] Error applying KPIs:', err);
+      alert(err?.message || 'Failed to apply KPI suggestions');
+    }
+  };
+
+  const filteredObjectives = objectives.filter(obj => {
+    if (searchTerm && !obj.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !obj.description.toLowerCase().includes(searchTerm.toLowerCase())) {
+      return false;
     }
 
-    resetForm();
-    loadObjectives();
-  }
-
-  async function handleDelete(id: string) {
-    if (confirm('Delete this objective?')) {
-      await supabase.from('cde_objectives').delete().eq('id', id);
-      loadObjectives();
+    if (domainFilter && obj.domain !== domainFilter) {
+      return false;
     }
-  }
 
-  function resetForm() {
-    setFormData({ parent_id: '', domain: 'Communication', level: 'general', title: '', description: '', smart_specific: '', smart_measurable: '', risks: '', assumptions: '', status: 'draft' });
-    setChangeRationale('');
-    setEditingId(null);
-    setShowForm(false);
-  }
+    if (priorityFilter && obj.priority !== priorityFilter) {
+      return false;
+    }
 
-  function startEdit(obj: Objective) {
-    setFormData({ parent_id: obj.parent_id || '', domain: obj.domain, level: obj.level, title: obj.title, description: obj.description, smart_specific: '', smart_measurable: '', risks: '', assumptions: '', status: obj.status });
-    setEditingId(obj.id);
-    setShowForm(true);
-  }
+    if (statusFilter && obj.status !== statusFilter) {
+      return false;
+    }
 
-  function toggleExpand(id: string) {
-    const newExpanded = new Set(expandedIds);
-    if (newExpanded.has(id)) newExpanded.delete(id); else newExpanded.add(id);
-    setExpandedIds(newExpanded);
-  }
+    return true;
+  });
 
-  const filtered = objectives.filter(o => (o.title.toLowerCase().includes(searchTerm.toLowerCase()) || o.description.toLowerCase().includes(searchTerm.toLowerCase())) && (!domainFilter || o.domain === domainFilter));
-  const roots = filtered.filter(o => !o.parent_id);
+  const stats = {
+    total: objectives.length,
+    high_priority: objectives.filter(o => o.priority === 'high').length,
+    needs_attention: objectives.filter(o => o.status === 'needs_kpis' || o.status === 'needs_activities' || o.status === 'at_risk').length,
+    on_track: objectives.filter(o => o.status === 'on_track').length
+  };
 
-  function renderTree(obj: Objective, depth = 0) {
-    const children = filtered.filter(o => o.parent_id === obj.id);
-    const hasChildren = children.length > 0;
-    const isExpanded = expandedIds.has(obj.id);
-
+  if (!currentProject) {
     return (
-      <div key={obj.id} className="border-b border-slate-200">
-        <div className="flex items-center justify-between p-4 hover:bg-slate-50" style={{ paddingLeft: `${depth * 2 + 1}rem` }}>
-          <div className="flex items-center gap-3 flex-1">
-            {hasChildren && <button onClick={() => toggleExpand(obj.id)} className="text-slate-400">{isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}</button>}
-            {!hasChildren && <div className="w-5" />}
-            <GitBranch size={16} className="text-slate-400" />
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="font-semibold text-slate-900">{obj.title}</span>
-                <span className={`text-xs px-2 py-0.5 rounded ${obj.domain === 'Communication' ? 'bg-blue-100 text-blue-700' : obj.domain === 'Dissemination' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{obj.domain}</span>
-                <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">{obj.level}</span>
-              </div>
-              {obj.description && <p className="text-sm text-slate-600">{obj.description}</p>}
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => startEdit(obj)} className="text-blue-600"><Edit size={18} /></button>
-            <button onClick={() => handleDelete(obj.id)} className="text-red-600"><Trash2 size={18} /></button>
-          </div>
-        </div>
-        {isExpanded && hasChildren && <div>{children.map(c => renderTree(c, depth + 1))}</div>}
+      <div className="text-center py-12">
+        <p className="text-gray-600">Select a project to manage objectives</p>
       </div>
     );
   }
-
-  if (!currentProject) return <div className="text-center py-12"><p className="text-slate-600">Select a project</p></div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">CDE Strategy Builder</h1>
-          <p className="text-slate-600 mt-1">Define objectives</p>
+          <h1 className="text-3xl font-bold text-gray-900">Objectives</h1>
+          <p className="text-gray-600 mt-1">Define and track communication, dissemination and exploitation objectives</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"><Plus size={20} />New</button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={handleRefreshHealth}
+            disabled={refreshingHealth}
+            className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshingHealth ? 'animate-spin' : ''}`} />
+            <span>Refresh Health</span>
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Add Objective</span>
+          </button>
+        </div>
       </div>
 
-      <FilterPanel onClear={() => { setDomainFilter(''); }}>
-        <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1">Domain</label>
-          <select value={domainFilter} onChange={(e) => setDomainFilter(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md">
-            <option value="">All</option>
-            <option value="Communication">Communication</option>
-            <option value="Dissemination">Dissemination</option>
-            <option value="Exploitation">Exploitation</option>
-          </select>
-        </div>
-        <div className="md:col-span-3">
-          <label className="block text-xs font-medium text-slate-700 mb-1">Search</label>
-          <SearchBar value={searchTerm} onChange={setSearchTerm} />
-        </div>
-      </FilterPanel>
-
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-slate-200"><h2 className="text-lg font-semibold text-slate-900">Objectives Tree</h2></div>
-        {filtered.length === 0 ? <div className="p-6 text-center text-slate-600">No objectives</div> : <div>{roots.map(o => renderTree(o, 0))}</div>}
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full my-8">
-            <div className="p-6 border-b"><h3 className="text-lg font-semibold">{editingId ? 'Edit' : 'New'} Objective</h3></div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-slate-700 mb-1">Domain</label><select required value={formData.domain} onChange={(e) => setFormData({ ...formData, domain: e.target.value })} className="w-full px-3 py-2 border rounded-md"><option value="Communication">Communication</option><option value="Dissemination">Dissemination</option><option value="Exploitation">Exploitation</option></select></div>
-                <div><label className="block text-sm font-medium text-slate-700 mb-1">Level</label><select required value={formData.level} onChange={(e) => setFormData({ ...formData, level: e.target.value })} className="w-full px-3 py-2 border rounded-md"><option value="general">General</option><option value="specific">Specific</option><option value="operational">Operational</option></select></div>
-                <div className="col-span-2"><label className="block text-sm font-medium text-slate-700 mb-1">Parent</label><select value={formData.parent_id} onChange={(e) => setFormData({ ...formData, parent_id: e.target.value })} className="w-full px-3 py-2 border rounded-md"><option value="">None</option>{objectives.filter(o => o.id !== editingId).map(o => <option key={o.id} value={o.id}>{o.title}</option>)}</select></div>
-                <div className="col-span-2"><label className="block text-sm font-medium text-slate-700 mb-1">Title</label><input type="text" required value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="w-full px-3 py-2 border rounded-md" /></div>
-                <div className="col-span-2"><label className="block text-sm font-medium text-slate-700 mb-1">Description</label><textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={2} className="w-full px-3 py-2 border rounded-md" /></div>
-                <div><label className="block text-sm font-medium text-slate-700 mb-1">SMART Specific</label><textarea value={formData.smart_specific} onChange={(e) => setFormData({ ...formData, smart_specific: e.target.value })} rows={2} className="w-full px-3 py-2 border rounded-md" /></div>
-                <div><label className="block text-sm font-medium text-slate-700 mb-1">SMART Measurable</label><textarea value={formData.smart_measurable} onChange={(e) => setFormData({ ...formData, smart_measurable: e.target.value })} rows={2} className="w-full px-3 py-2 border rounded-md" /></div>
-                <div><label className="block text-sm font-medium text-slate-700 mb-1">Risks</label><textarea value={formData.risks} onChange={(e) => setFormData({ ...formData, risks: e.target.value })} rows={2} className="w-full px-3 py-2 border rounded-md" /></div>
-                <div><label className="block text-sm font-medium text-slate-700 mb-1">Assumptions</label><textarea value={formData.assumptions} onChange={(e) => setFormData({ ...formData, assumptions: e.target.value })} rows={2} className="w-full px-3 py-2 border rounded-md" /></div>
-                {editingId && <div className="col-span-2"><label className="block text-sm font-medium text-slate-700 mb-1">Change Rationale</label><textarea required value={changeRationale} onChange={(e) => setChangeRationale(e.target.value)} rows={2} className="w-full px-3 py-2 border rounded-md" /></div>}
-              </div>
-              <div className="flex gap-2 pt-4">
-                <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">{editingId ? 'Update' : 'Create'}</button>
-                <button type="button" onClick={resetForm} className="bg-slate-200 text-slate-700 px-4 py-2 rounded-md hover:bg-slate-300">Cancel</button>
-              </div>
-            </form>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-2">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-sm text-red-800 mb-2">{error}</div>
+            <button
+              onClick={loadObjectives}
+              className="text-sm text-red-700 font-medium hover:text-red-800 underline"
+            >
+              Retry
+            </button>
           </div>
         </div>
+      )}
+
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-600">Total Objectives</span>
+            <Target className="w-5 h-5 text-gray-400" />
+          </div>
+          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-600">High Priority</span>
+            <TrendingUp className="w-5 h-5 text-orange-400" />
+          </div>
+          <div className="text-2xl font-bold text-orange-600">{stats.high_priority}</div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-600">Needs Attention</span>
+            <AlertCircle className="w-5 h-5 text-yellow-400" />
+          </div>
+          <div className="text-2xl font-bold text-yellow-600">{stats.needs_attention}</div>
+        </div>
+
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-600">On Track</span>
+            <Activity className="w-5 h-5 text-green-400" />
+          </div>
+          <div className="text-2xl font-bold text-green-600">{stats.on_track}</div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Search</label>
+            <SearchBar value={searchTerm} onChange={setSearchTerm} placeholder="Search objectives..." />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Domain</label>
+            <select
+              value={domainFilter}
+              onChange={(e) => setDomainFilter(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">All Domains</option>
+              <option value="communication">Communication</option>
+              <option value="dissemination">Dissemination</option>
+              <option value="exploitation">Exploitation</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+            <select
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">All Priorities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">All Statuses</option>
+              <option value="on_track">On Track</option>
+              <option value="at_risk">At Risk</option>
+              <option value="needs_kpis">Needs KPIs</option>
+              <option value="needs_activities">Needs Activities</option>
+              <option value="no_data">No Data</option>
+            </select>
+          </div>
+        </div>
+        {(searchTerm || domainFilter || priorityFilter || statusFilter) && (
+          <button
+            onClick={() => {
+              setSearchTerm('');
+              setDomainFilter('');
+              setPriorityFilter('');
+              setStatusFilter('');
+            }}
+            className="mt-3 text-sm text-blue-600 hover:text-blue-700"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      ) : filteredObjectives.length === 0 ? (
+        <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+          <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-gray-600 mb-4">
+            {objectives.length === 0 ? 'No objectives created yet' : 'No objectives match your filters'}
+          </p>
+          {objectives.length === 0 && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Create your first objective</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {filteredObjectives.map((objective) => (
+            <ObjectiveCard
+              key={objective.objective_id}
+              objective={objective}
+              onEdit={() => setEditingObjective(objective)}
+              onDelete={() => handleDelete(objective.objective_id)}
+              onApplyKPIs={() => handleApplyKPIs(objective.objective_id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {showAddModal && (
+        <AddObjectiveModal
+          projectId={currentProject.id}
+          onClose={() => setShowAddModal(false)}
+          onSuccess={() => {
+            setShowAddModal(false);
+            loadObjectives();
+          }}
+        />
+      )}
+
+      {editingObjective && (
+        <ObjectiveEditPanel
+          projectId={currentProject.id}
+          objective={editingObjective}
+          onClose={() => setEditingObjective(null)}
+          onUpdate={() => {
+            setEditingObjective(null);
+            loadObjectives();
+          }}
+        />
       )}
     </div>
   );

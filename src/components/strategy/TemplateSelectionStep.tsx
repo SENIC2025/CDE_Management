@@ -58,9 +58,9 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
       await strategyService.applyTemplate(projectId, templateCode);
       setSelectedTemplate(templateCode);
       onUpdate();
-    } catch (err) {
-      console.error('Error applying template:', err);
-      alert('Failed to apply template');
+    } catch (err: any) {
+      console.error('[Templates] Error applying template:', err);
+      alert(err?.message || 'Failed to apply template');
     } finally {
       setApplying(false);
     }

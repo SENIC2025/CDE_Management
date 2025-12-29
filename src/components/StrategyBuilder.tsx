@@ -31,9 +31,9 @@ export default function StrategyBuilder({ onClose }: StrategyBuilderProps) {
         setLoading(true);
         const data = await strategyService.getOrCreateStrategy(currentProject.id);
         setStrategy(data);
-      } catch (err) {
-        console.error('Error loading strategy:', err);
-        setError('Failed to load strategy');
+      } catch (err: any) {
+        console.error('[Strategy] Error loading strategy:', err);
+        setError(err?.message || 'Failed to load strategy');
       } finally {
         setLoading(false);
       }
@@ -65,9 +65,10 @@ export default function StrategyBuilder({ onClose }: StrategyBuilderProps) {
             setSaveStatus('idle');
           }
         }, 2000);
-      } catch (err) {
-        console.error('Error saving strategy:', err);
+      } catch (err: any) {
+        console.error('[Strategy] Error saving strategy:', err);
         setSaveStatus('failed');
+        setError(err?.message || 'Failed to save strategy');
         setPendingSave(false);
       }
     }, 1000);

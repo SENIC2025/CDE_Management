@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Plus, TrendingUp, BookOpen, Target, Library, AlertCircle, X, Edit2, Save } from 'lucide-react';
+import { Plus, TrendingUp, BookOpen, Target, Library, AlertCircle, X, Edit2, Save, ExternalLink, Search, Filter } from 'lucide-react';
 import IndicatorSelectorModal from './IndicatorSelectorModal';
+import IndicatorLibraryPickerModal from './indicators/IndicatorLibraryPickerModal';
 
 interface ProjectIndicator {
   project_indicator_id: string;
@@ -26,11 +28,14 @@ interface ProjectIndicator {
 
 interface ProjectIndicatorsProps {
   projectId: string;
+  onChange?: () => void;
 }
 
-export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps) {
+export default function ProjectIndicators({ projectId, onChange }: ProjectIndicatorsProps) {
+  const navigate = useNavigate();
   const [indicators, setIndicators] = useState<ProjectIndicator[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   const [showSelector, setShowSelector] = useState(false);
   const [selectedIndicator, setSelectedIndicator] = useState<ProjectIndicator | null>(null);
   const [editing, setEditing] = useState(false);
@@ -40,12 +45,18 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
   const [editedNotes, setEditedNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDomain, setSelectedDomain] = useState<string>('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedView, setSelectedView] = useState<string>('all');
+
   useEffect(() => {
     loadIndicators();
   }, [projectId]);
 
   async function loadIndicators() {
     try {
+      console.log('[ProjectIndicators] Loading indicators for project:', projectId);
       setLoading(true);
 
       const { data, error } = await supabase
@@ -78,7 +89,7 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
       if (error) throw error;
       setIndicators(data || []);
     } catch (error) {
-      console.error('Error loading project indicators:', error);
+      console.error('[ProjectIndicators] Error loading indicators:', error);
     } finally {
       setLoading(false);
     }
@@ -125,11 +136,15 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
         });
       }
     } catch (error) {
-      console.error('Error saving edits:', error);
+      console.error('[ProjectIndicators] Error saving edits:', error);
       alert('Failed to save changes. Please try again.');
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleViewDefinition(indicatorId: string) {
+    navigate(`/library?indicatorId=${indicatorId}`);
   }
 
   function calculateProgress(current: number | null, target: number | null): number {
@@ -161,6 +176,31 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
     ).join(' ');
   }
 
+  const filteredIndicators = useMemo(() => {
+    let filtered = [...indicators];
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(ind =>
+        ind.indicator.name.toLowerCase().includes(term) ||
+        ind.indicator.code.toLowerCase().includes(term) ||
+        ind.indicator.definition.toLowerCase().includes(term)
+      );
+    }
+
+    if (selectedDomain !== 'all') {
+      filtered = filtered.filter(ind => ind.indicator.domain === selectedDomain);
+    }
+
+    if (selectedView === 'missing_baseline') {
+      filtered = filtered.filter(ind => !ind.baseline);
+    } else if (selectedView === 'missing_target') {
+      filtered = filtered.filter(ind => !ind.target);
+    }
+
+    return filtered;
+  }, [indicators, searchTerm, selectedDomain, selectedView]);
+
   const domainGroups = {
     communication: indicators.filter(i => i.indicator.domain === 'communication'),
     dissemination: indicators.filter(i => i.indicator.domain === 'dissemination'),
@@ -170,6 +210,13 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
   const hasAllDomains = domainGroups.communication.length > 0 &&
     domainGroups.dissemination.length > 0 &&
     domainGroups.exploitation.length > 0;
+
+  const handleLibraryApplied = (result: { inserted: number; skipped: number }) => {
+    const message = `Added ${result.inserted} indicator${result.inserted !== 1 ? 's' : ''}${result.skipped > 0 ? `, ${result.skipped} already added` : ''}`;
+    alert(message);
+    loadIndicators();
+    if (onChange) onChange();
+  };
 
   if (loading) {
     return (
@@ -186,13 +233,22 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
           <h2 className="text-lg font-semibold text-slate-900">Project Indicators</h2>
           <p className="text-sm text-slate-600">Track performance metrics from the indicator library</p>
         </div>
-        <button
-          onClick={() => setShowSelector(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Add Indicator
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowLibraryPicker(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add from Library
+          </button>
+          <button
+            onClick={() => setShowSelector(true)}
+            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
+          >
+            <Library className="h-4 w-4" />
+            Use Bundle
+          </button>
+        </div>
       </div>
 
       {!hasAllDomains && indicators.length > 0 && (
@@ -209,13 +265,62 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
         </div>
       )}
 
+      {indicators.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="flex flex-col md:flex-row gap-3 mb-3">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search indicators..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+            </div>
+            <select
+              value={selectedView}
+              onChange={(e) => setSelectedView(e.target.value)}
+              className="px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+            >
+              <option value="all">All Indicators</option>
+              <option value="missing_baseline">Missing Baseline</option>
+              <option value="missing_target">Missing Target</option>
+            </select>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="px-3 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-sm"
+            >
+              <Filter className="h-4 w-4" />
+              Filters
+            </button>
+          </div>
+
+          {showFilters && (
+            <div className="pt-3 border-t border-slate-200">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Domain</label>
+              <select
+                value={selectedDomain}
+                onChange={(e) => setSelectedDomain(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="all">All Domains</option>
+                <option value="communication">Communication</option>
+                <option value="dissemination">Dissemination</option>
+                <option value="exploitation">Exploitation</option>
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
       {indicators.length === 0 ? (
         <div className="text-center py-12 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
           <Library className="h-12 w-12 text-slate-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-slate-900 mb-2">No indicators added yet</h3>
           <p className="text-slate-600 mb-4">Add professional indicators from the library to track project performance</p>
           <button
-            onClick={() => setShowSelector(true)}
+            onClick={() => setShowLibraryPicker(true)}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
           >
             <Plus className="h-4 w-4" />
@@ -224,23 +329,25 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {indicators.map((indicator) => {
+          {filteredIndicators.map((indicator) => {
             const DomainIcon = getDomainIcon(indicator.indicator.domain);
             const progress = calculateProgress(indicator.current_value, indicator.target);
 
             return (
               <div
                 key={indicator.project_indicator_id}
-                onClick={() => openIndicatorPanel(indicator)}
-                className="bg-white rounded-lg border border-slate-200 p-5 hover:shadow-md transition-shadow cursor-pointer"
+                className="bg-white rounded-lg border border-slate-200 p-5 hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between mb-3">
-                  <span className={`px-2 py-1 rounded border text-xs font-medium ${getDomainColor(indicator.indicator.domain)}`}>
-                    <div className="flex items-center gap-1">
-                      <DomainIcon className="h-3 w-3" />
-                      {formatLabel(indicator.indicator.domain)}
-                    </div>
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2 py-1 rounded border text-xs font-medium ${getDomainColor(indicator.indicator.domain)}`}>
+                      <div className="flex items-center gap-1">
+                        <DomainIcon className="h-3 w-3" />
+                        {formatLabel(indicator.indicator.domain)}
+                      </div>
+                    </span>
+                    <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded">Library</span>
+                  </div>
                 </div>
 
                 <div className="mb-4">
@@ -282,12 +389,42 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
                       </div>
                     </div>
                   </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <button
+                      onClick={() => handleViewDefinition(indicator.indicator_id)}
+                      className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      View definition
+                    </button>
+                    <button
+                      onClick={() => openIndicatorPanel(indicator)}
+                      className="text-xs px-2 py-1 bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+                    >
+                      Edit values
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {filteredIndicators.length === 0 && indicators.length > 0 && (
+        <div className="text-center py-8 text-slate-600">
+          No indicators match your current filters
+        </div>
+      )}
+
+      <IndicatorLibraryPickerModal
+        open={showLibraryPicker}
+        onClose={() => setShowLibraryPicker(false)}
+        projectId={projectId}
+        onApplied={handleLibraryApplied}
+        allowMultiSelect={true}
+      />
 
       {showSelector && (
         <IndicatorSelectorModal
@@ -296,6 +433,7 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
           onSelect={() => {
             setShowSelector(false);
             loadIndicators();
+            if (onChange) onChange();
           }}
         />
       )}
@@ -369,6 +507,16 @@ export default function ProjectIndicators({ projectId }: ProjectIndicatorsProps)
                 <p className="text-sm text-slate-700 leading-relaxed">{selectedIndicator.indicator.interpretation_notes}</p>
               </div>
             )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleViewDefinition(selectedIndicator.indicator_id)}
+                className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                <ExternalLink className="h-4 w-4" />
+                View Full Definition
+              </button>
+            </div>
 
             <div className="border-t border-slate-200 pt-6 space-y-4">
               <h3 className="text-sm font-semibold text-slate-900">Project Values</h3>

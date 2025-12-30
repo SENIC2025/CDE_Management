@@ -1,25 +1,30 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useProject } from '../contexts/ProjectContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit, Trash2, TrendingUp, FileText, MessageSquare, Zap, HelpCircle, Library } from 'lucide-react';
+import { Plus, Edit, Trash2, TrendingUp, FileText, MessageSquare, Zap, HelpCircle, Library, Calendar, ClipboardList, Inbox } from 'lucide-react';
 import SearchBar from '../components/SearchBar';
 import EvidencePicker from '../components/EvidencePicker';
 import ProjectIndicators from '../components/ProjectIndicators';
 import { usePermissions } from '../hooks/usePermissions';
 import { logIndicatorChange, logEvidenceChange } from '../lib/audit';
 import { DecisionSupportService, DerivedMetrics } from '../lib/decisionSupport';
+import WorkQueueTab from '../components/monitoring/WorkQueueTab';
+import QuickIndicatorLogDrawer from '../components/monitoring/QuickIndicatorLogDrawer';
+import EvidenceInboxTab from '../components/monitoring/EvidenceInboxTab';
 
 export default function Monitoring() {
   const { currentProject } = useProject();
   const { profile } = useAuth();
   const permissions = usePermissions();
-  const [activeTab, setActiveTab] = useState<'library' | 'indicators' | 'evidence' | 'surveys' | 'logs' | 'derived'>('library');
+  const [activeTab, setActiveTab] = useState<'workqueue' | 'library' | 'indicators' | 'values' | 'evidence' | 'evidence-inbox' | 'surveys' | 'logs' | 'derived'>('workqueue');
   const [derivedMetrics, setDerivedMetrics] = useState<DerivedMetrics | null>(null);
   const [indicators, setIndicators] = useState<any[]>([]);
   const [evidence, setEvidence] = useState<any[]>([]);
   const [surveys, setSurveys] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
+  const [indicatorValues, setIndicatorValues] = useState<any[]>([]);
+  const [evidenceLinks, setEvidenceLinks] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showIndicatorForm, setShowIndicatorForm] = useState(false);
   const [showEvidenceForm, setShowEvidenceForm] = useState(false);
@@ -33,20 +38,35 @@ export default function Monitoring() {
   const [evidenceData, setEvidenceData] = useState({ type: 'document', title: '', description: '', file_path: '', url: '' });
   const [surveyData, setSurveyData] = useState({ title: '', description: '', schema_json: '{}' });
   const [logData, setLogData] = useState({ outcome_description: '', context: '', observations: '' });
-  const [indicatorValues, setIndicatorValues] = useState<any[]>([]);
   const [valueData, setValueData] = useState({ period: '', value: 0, notes: '' });
   const [showValueForm, setShowValueForm] = useState(false);
 
-  useEffect(() => { if (currentProject) { loadIndicators(); loadEvidence(); loadSurveys(); loadLogs(); } }, [currentProject]);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('2025-Q1');
+  const [availablePeriods, setAvailablePeriods] = useState<string[]>(['2025-Q1', '2024-Q4', '2024-Q3', '2024-Q2']);
+  const [quickLogIndicatorId, setQuickLogIndicatorId] = useState<string | null>(null);
+  const [quickLogQueue, setQuickLogQueue] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (currentProject) {
+      loadIndicators();
+      loadEvidence();
+      loadSurveys();
+      loadLogs();
+      loadIndicatorValues();
+      loadEvidenceLinks();
+    }
+  }, [currentProject]);
 
   useEffect(() => { if (currentProject && activeTab === 'derived') { loadDerivedMetrics(); } }, [currentProject, activeTab]);
 
   async function loadIndicators() {
+    console.log('[ME] Loading indicators');
     const { data } = await supabase.from('indicators').select('*').eq('project_id', currentProject!.id).order('created_at', { ascending: false });
     setIndicators(data || []);
   }
 
   async function loadEvidence() {
+    console.log('[ME] Loading evidence');
     const { data } = await supabase.from('evidence_items').select('*').eq('project_id', currentProject!.id).order('created_at', { ascending: false });
     setEvidence(data || []);
   }
@@ -59,6 +79,18 @@ export default function Monitoring() {
   async function loadLogs() {
     const { data } = await supabase.from('qualitative_outcome_logs').select('*').eq('project_id', currentProject!.id).order('created_at', { ascending: false });
     setLogs(data || []);
+  }
+
+  async function loadIndicatorValues() {
+    console.log('[ME] Loading indicator values');
+    const { data } = await supabase.from('indicator_values').select('*').eq('project_id', currentProject!.id).order('period', { ascending: false });
+    setIndicatorValues(data || []);
+  }
+
+  async function loadEvidenceLinks() {
+    console.log('[ME] Loading evidence links');
+    const { data } = await supabase.from('evidence_links').select('*');
+    setEvidenceLinks(data || []);
   }
 
   async function loadDerivedMetrics() {
@@ -149,7 +181,8 @@ export default function Monitoring() {
     await supabase.from('indicator_values').insert({ ...valueData, indicator_id: showValues, project_id: currentProject!.id });
     setValueData({ period: '', value: 0, notes: '' });
     setShowValueForm(false);
-    loadIndicatorValues(showValues!);
+    loadIndicatorValues();
+    if (showValues) loadIndicatorValuesFor(showValues);
   }
 
   async function handleDelete(id: string, type: 'indicator' | 'evidence' | 'survey' | 'log') {
@@ -191,9 +224,11 @@ export default function Monitoring() {
     }
   }
 
-  async function loadIndicatorValues(indicatorId: string) {
+  const [indicatorValuesForModal, setIndicatorValuesForModal] = useState<any[]>([]);
+
+  async function loadIndicatorValuesFor(indicatorId: string) {
     const { data } = await supabase.from('indicator_values').select('*').eq('indicator_id', indicatorId).order('period', { ascending: false });
-    setIndicatorValues(data || []);
+    setIndicatorValuesForModal(data || []);
     setShowValues(indicatorId);
   }
 
@@ -203,30 +238,106 @@ export default function Monitoring() {
     setShowEvidenceLink(indicatorId);
   }
 
+  const handleOpenQuickLog = (indicatorId: string, queue: string[] = []) => {
+    setQuickLogIndicatorId(indicatorId);
+    setQuickLogQueue(queue);
+  };
+
+  const handleQuickLogNext = () => {
+    if (!quickLogIndicatorId || quickLogQueue.length === 0) return;
+    const currentIndex = quickLogQueue.indexOf(quickLogIndicatorId);
+    if (currentIndex < quickLogQueue.length - 1) {
+      setQuickLogIndicatorId(quickLogQueue[currentIndex + 1]);
+    }
+  };
+
   const filteredIndicators = indicators.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredEvidence = evidence.filter(e => e.title.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredSurveys = surveys.filter(s => s.title.toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredLogs = logs.filter(l => l.outcome_description.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  if (!currentProject) return <div className="text-center py-12"><p className="text-slate-600">Select a project</p></div>;
+  const valuesForPeriod = useMemo(() => {
+    return indicatorValues.filter(v => v.period === selectedPeriod);
+  }, [indicatorValues, selectedPeriod]);
+
+  const currentIndicator = indicators.find(ind => ind.id === quickLogIndicatorId) || null;
+
+  if (!currentProject) return <div className="text-center py-12"><p className="text-slate-600">Select a project to manage M&E and evidence</p></div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold text-slate-900">Monitoring, Evaluation & Evidence</h1><p className="text-slate-600 mt-1">Track indicators and manage evidence</p></div>
-        <button onClick={() => activeTab === 'indicators' ? setShowIndicatorForm(true) : activeTab === 'evidence' ? setShowEvidenceForm(true) : activeTab === 'surveys' ? setShowSurveyForm(true) : setShowLogForm(true)} disabled={!permissions.canCreate()} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"><Plus size={20} />New</button>
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Monitoring, Evaluation & Evidence</h1>
+          <p className="text-slate-600 mt-1">Track indicators and manage evidence</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center space-x-2">
+            <Calendar className="w-4 h-4 text-gray-500" />
+            <select
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+            >
+              {availablePeriods.map(period => (
+                <option key={period} value={period}>{period}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={() => {
+              if (activeTab === 'indicators') setShowIndicatorForm(true);
+              else if (activeTab === 'evidence') setShowEvidenceForm(true);
+              else if (activeTab === 'surveys') setShowSurveyForm(true);
+              else if (activeTab === 'logs') setShowLogForm(true);
+            }}
+            disabled={!permissions.canCreate() || activeTab === 'workqueue' || activeTab === 'library' || activeTab === 'evidence-inbox' || activeTab === 'values' || activeTab === 'derived'}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
+          >
+            <Plus size={20} />New
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 border-b overflow-x-auto">
-        <button onClick={() => setActiveTab('library')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'library' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}><Library size={16} />Library Indicators</button>
-        <button onClick={() => setActiveTab('indicators')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'indicators' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Custom Indicators</button>
+        <button onClick={() => setActiveTab('workqueue')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'workqueue' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>
+          <ClipboardList size={16} />Work Queue
+        </button>
+        <button onClick={() => setActiveTab('library')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'library' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>
+          <Library size={16} />Library
+        </button>
+        <button onClick={() => setActiveTab('indicators')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'indicators' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Indicators</button>
+        <button onClick={() => setActiveTab('values')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'values' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Values</button>
         <button onClick={() => setActiveTab('evidence')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'evidence' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Evidence</button>
+        <button onClick={() => setActiveTab('evidence-inbox')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'evidence-inbox' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>
+          <Inbox size={16} />Evidence Inbox
+        </button>
         <button onClick={() => setActiveTab('surveys')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'surveys' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Surveys</button>
         <button onClick={() => setActiveTab('logs')} className={`px-4 py-2 font-medium whitespace-nowrap ${activeTab === 'logs' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>Qualitative Logs</button>
-        <button onClick={() => setActiveTab('derived')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'derived' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}><Zap size={16} />Derived Metrics</button>
+        <button onClick={() => setActiveTab('derived')} className={`px-4 py-2 font-medium flex items-center gap-2 whitespace-nowrap ${activeTab === 'derived' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-600'}`}>
+          <Zap size={16} />Derived Metrics
+        </button>
       </div>
 
-      {activeTab !== 'library' && (
+      {activeTab === 'workqueue' && (
+        <WorkQueueTab
+          projectId={currentProject.id}
+          selectedPeriod={selectedPeriod}
+          indicators={indicators}
+          indicatorValues={indicatorValues}
+          evidenceLinks={evidenceLinks}
+          onLogValue={(indicatorId) => {
+            const missingIds = indicators
+              .filter(ind => !indicatorValues.some(v => v.indicator_id === ind.id && v.period === selectedPeriod))
+              .map(ind => ind.id);
+            handleOpenQuickLog(indicatorId, missingIds);
+          }}
+          onAttachEvidence={(indicatorId) => handleOpenQuickLog(indicatorId)}
+          onViewEvidenceInbox={() => setActiveTab('evidence-inbox')}
+        />
+      )}
+
+      {(activeTab === 'indicators' || activeTab === 'values' || activeTab === 'evidence' || activeTab === 'surveys' || activeTab === 'logs') && activeTab !== 'library' && activeTab !== 'derived' && (
         <div className="bg-slate-50 border rounded p-4"><SearchBar value={searchTerm} onChange={setSearchTerm} /></div>
       )}
 
@@ -253,7 +364,8 @@ export default function Monitoring() {
                       {ind.description && <p className="text-sm text-slate-600">{ind.description}</p>}
                       <p className="text-xs text-slate-500 mt-1">Unit: {ind.unit} | Baseline: {ind.baseline} | Target: {ind.target}</p>
                       <div className="flex gap-2 mt-2">
-                        <button onClick={() => loadIndicatorValues(ind.id)} className="text-xs text-blue-600 hover:text-blue-700">View Values</button>
+                        <button onClick={() => handleOpenQuickLog(ind.id)} className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">Quick Log</button>
+                        <button onClick={() => loadIndicatorValuesFor(ind.id)} className="text-xs text-blue-600 hover:text-blue-700">View Values</button>
                         <button onClick={() => loadLinkedEvidence(ind.id)} className="text-xs text-blue-600 hover:text-blue-700">View Evidence</button>
                       </div>
                     </div>
@@ -264,6 +376,39 @@ export default function Monitoring() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'values' && (
+        <div className="bg-white rounded-lg shadow">
+          <div className="p-6 border-b">
+            <h2 className="text-lg font-semibold">Indicator Values for {selectedPeriod}</h2>
+            <p className="text-sm text-slate-600 mt-1">{valuesForPeriod.length} value{valuesForPeriod.length !== 1 ? 's' : ''} logged</p>
+          </div>
+          {valuesForPeriod.length === 0 ? <div className="p-6 text-center text-slate-600">No values for this period</div> : (
+            <div className="divide-y">
+              {valuesForPeriod.map(val => {
+                const indicator = indicators.find(ind => ind.id === val.indicator_id);
+                return (
+                  <div key={val.id} className="p-6 hover:bg-slate-50">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="font-semibold text-slate-900">{indicator?.name || 'Unknown Indicator'}</div>
+                        <div className="text-sm text-slate-600 mt-1">Value: <span className="font-medium">{val.value}</span> {indicator?.unit}</div>
+                        {val.notes && <p className="text-sm text-slate-500 mt-1">{val.notes}</p>}
+                      </div>
+                      <button
+                        onClick={() => handleOpenQuickLog(val.indicator_id)}
+                        className="text-sm text-blue-600 hover:text-blue-700"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -293,6 +438,19 @@ export default function Monitoring() {
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'evidence-inbox' && (
+        <EvidenceInboxTab
+          projectId={currentProject.id}
+          evidenceItems={evidence}
+          evidenceLinks={evidenceLinks}
+          indicators={indicators}
+          onRefresh={() => {
+            loadEvidence();
+            loadEvidenceLinks();
+          }}
+        />
       )}
 
       {activeTab === 'surveys' && (
@@ -542,9 +700,9 @@ export default function Monitoring() {
               </div>
             </div>
             <div className="p-6">
-              {indicatorValues.length === 0 ? <p className="text-center text-slate-600">No values recorded</p> : (
+              {indicatorValuesForModal.length === 0 ? <p className="text-center text-slate-600">No values recorded</p> : (
                 <div className="space-y-2">
-                  {indicatorValues.map(val => (
+                  {indicatorValuesForModal.map(val => (
                     <div key={val.id} className="flex justify-between p-3 bg-slate-50 rounded">
                       <div><span className="font-medium">{val.period}</span> <span className="text-slate-600">- Value: {val.value}</span>{val.notes && <p className="text-sm text-slate-500">{val.notes}</p>}</div>
                     </div>
@@ -581,6 +739,24 @@ export default function Monitoring() {
             </div>
           </div>
         </div>
+      )}
+
+      {quickLogIndicatorId && currentIndicator && (
+        <QuickIndicatorLogDrawer
+          indicator={currentIndicator}
+          projectId={currentProject.id}
+          selectedPeriod={selectedPeriod}
+          queue={quickLogQueue}
+          onClose={() => {
+            setQuickLogIndicatorId(null);
+            setQuickLogQueue([]);
+          }}
+          onSaved={() => {
+            loadIndicatorValues();
+            loadEvidenceLinks();
+          }}
+          onNext={handleQuickLogNext}
+        />
       )}
     </div>
   );

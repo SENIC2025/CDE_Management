@@ -42,6 +42,7 @@ import {
   BarChart3,
   FolderCog,
 } from 'lucide-react';
+import CdeLogo from './CdeLogo';
 
 // ── Types ──────────────────────────────────────────────
 interface NavItem {
@@ -330,7 +331,12 @@ export default function Layout({ children }: LayoutProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
-          <h1 className="text-xl font-bold">CDE Manager</h1>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-md bg-[#1BAE70] flex items-center justify-center">
+              <CdeLogo size={18} className="text-white" />
+            </div>
+            <h1 className="text-xl font-bold">CDE Manager</h1>
+          </div>
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
             <X size={24} />
           </button>

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Leaf, ArrowRight, Mail, ArrowLeft } from 'lucide-react';
+import { ArrowRight, Mail, ArrowLeft } from 'lucide-react';
+import CdeLogo from '../components/CdeLogo';
 
 type ViewMode = 'login' | 'signup' | 'forgot';
 
@@ -62,7 +63,7 @@ export default function Login() {
         <div>
           <div className="flex items-center gap-3 mb-16">
             <div className="w-10 h-10 rounded-lg bg-[#1BAE70] flex items-center justify-center">
-              <Leaf size={22} className="text-white" />
+              <CdeLogo size={22} className="text-white" />
             </div>
             <span className="text-white text-xl font-bold tracking-tight">CDE Manager</span>
           </div>
@@ -118,7 +119,7 @@ export default function Login() {
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-10">
             <div className="w-10 h-10 rounded-lg bg-[#1BAE70] flex items-center justify-center">
-              <Leaf size={22} className="text-white" />
+              <CdeLogo size={22} className="text-white" />
             </div>
             <span className="text-[#14261C] text-xl font-bold tracking-tight">CDE Manager</span>
           </div>

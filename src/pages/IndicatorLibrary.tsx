@@ -1,127 +1,56 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
-import { useEntitlements } from '../contexts/EntitlementsContext';
-import { usePlatformAdmin } from '../hooks/usePlatformAdmin';
-import { Library, Filter, Plus, X, Search, TrendingUp, BookOpen, Target } from 'lucide-react';
-
-interface Indicator {
-  indicator_id: string;
-  code: string;
-  name: string;
-  domain: 'communication' | 'dissemination' | 'exploitation';
-  definition: string;
-  rationale: string;
-  limitations: string;
-  interpretation_notes: string;
-  unit: string;
-  aggregation_method: string;
-  data_source: string;
-  collection_frequency: string;
-  maturity_level: 'basic' | 'advanced' | 'expert';
-  is_system: boolean;
-  is_active: boolean;
-  objective_types?: string[];
-  channels?: string[];
-  stakeholders?: string[];
-  project_count?: number;
-}
+import { useState, useMemo } from 'react';
+import { Library, Filter, X, Search, TrendingUp, BookOpen, Target, ChevronDown, BarChart3, Layers } from 'lucide-react';
+import { INDICATOR_CATALOG } from '../lib/indicatorCatalog';
+import type { IndicatorLibrary as IndicatorType } from '../lib/indicatorLibraryService';
 
 export default function IndicatorLibrary() {
-  const { isOrgAdmin } = useEntitlements();
-  const { isPlatformAdmin } = usePlatformAdmin();
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
-  const [filteredIndicators, setFilteredIndicators] = useState<Indicator[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDomain, setSelectedDomain] = useState<string>('all');
   const [selectedMaturity, setSelectedMaturity] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
-  const [selectedIndicator, setSelectedIndicator] = useState<Indicator | null>(null);
+  const [selectedIndicator, setSelectedIndicator] = useState<IndicatorType | null>(null);
 
-  useEffect(() => {
-    loadIndicators();
+  // Domain stats
+  const domainStats = useMemo(() => {
+    const stats = { communication: 0, dissemination: 0, exploitation: 0 };
+    INDICATOR_CATALOG.forEach(ind => { stats[ind.domain]++; });
+    return stats;
   }, []);
 
-  useEffect(() => {
-    filterIndicators();
-  }, [indicators, searchTerm, selectedDomain, selectedMaturity]);
-
-  async function loadIndicators() {
-    try {
-      setLoading(true);
-
-      const { data: indicatorData, error } = await supabase
-        .from('indicator_library')
-        .select('*')
-        .eq('is_active', true)
-        .order('domain', { ascending: true })
-        .order('code', { ascending: true });
-
-      if (error) throw error;
-
-      if (indicatorData) {
-        const enrichedIndicators = await Promise.all(
-          indicatorData.map(async (indicator) => {
-            const [objectives, channels, stakeholders, projectCount] = await Promise.all([
-              supabase
-                .from('indicator_objective_types')
-                .select('objective_type')
-                .eq('indicator_id', indicator.indicator_id),
-              supabase
-                .from('indicator_channels')
-                .select('channel_type')
-                .eq('indicator_id', indicator.indicator_id),
-              supabase
-                .from('indicator_stakeholders')
-                .select('stakeholder_type')
-                .eq('indicator_id', indicator.indicator_id),
-              supabase
-                .from('project_indicators')
-                .select('project_indicator_id', { count: 'exact', head: true })
-                .eq('indicator_id', indicator.indicator_id)
-            ]);
-
-            return {
-              ...indicator,
-              objective_types: objectives.data?.map(o => o.objective_type) || [],
-              channels: channels.data?.map(c => c.channel_type) || [],
-              stakeholders: stakeholders.data?.map(s => s.stakeholder_type) || [],
-              project_count: projectCount.count || 0
-            };
-          })
-        );
-
-        setIndicators(enrichedIndicators);
-      }
-    } catch (error) {
-      console.error('Error loading indicators:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function filterIndicators() {
-    let filtered = [...indicators];
+  // Filter indicators
+  const filteredIndicators = useMemo(() => {
+    let results = [...INDICATOR_CATALOG];
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(ind =>
+      results = results.filter(ind =>
         ind.name.toLowerCase().includes(term) ||
         ind.code.toLowerCase().includes(term) ||
-        ind.definition.toLowerCase().includes(term)
+        ind.definition.toLowerCase().includes(term) ||
+        (ind.rationale && ind.rationale.toLowerCase().includes(term))
       );
     }
 
     if (selectedDomain !== 'all') {
-      filtered = filtered.filter(ind => ind.domain === selectedDomain);
+      results = results.filter(ind => ind.domain === selectedDomain);
     }
 
     if (selectedMaturity !== 'all') {
-      filtered = filtered.filter(ind => ind.maturity_level === selectedMaturity);
+      results = results.filter(ind => ind.maturity_level === selectedMaturity);
     }
 
-    setFilteredIndicators(filtered);
-  }
+    return results;
+  }, [searchTerm, selectedDomain, selectedMaturity]);
+
+  // Group by domain for section headers
+  const groupedIndicators = useMemo(() => {
+    const groups: Record<string, IndicatorType[]> = {};
+    filteredIndicators.forEach(ind => {
+      if (!groups[ind.domain]) groups[ind.domain] = [];
+      groups[ind.domain].push(ind);
+    });
+    return groups;
+  }, [filteredIndicators]);
 
   function getDomainIcon(domain: string) {
     switch (domain) {
@@ -141,6 +70,15 @@ export default function IndicatorLibrary() {
     }
   }
 
+  function getDomainHeaderColor(domain: string) {
+    switch (domain) {
+      case 'communication': return 'from-blue-500 to-blue-600';
+      case 'dissemination': return 'from-green-500 to-green-600';
+      case 'exploitation': return 'from-amber-500 to-amber-600';
+      default: return 'from-slate-500 to-slate-600';
+    }
+  }
+
   function getMaturityBadge(level: string) {
     const colors = {
       basic: 'bg-slate-100 text-slate-700',
@@ -156,56 +94,98 @@ export default function IndicatorLibrary() {
     ).join(' ');
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-slate-600">Loading indicator library...</div>
-      </div>
-    );
-  }
+  const domainOrder = ['communication', 'dissemination', 'exploitation'];
 
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
-                <Library className="h-6 w-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900">Indicator Library</h1>
-                <p className="text-sm text-slate-600">Professional KPI library for EU CDE projects</p>
-              </div>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+              <Library className="h-6 w-6 text-white" />
             </div>
-            {(isOrgAdmin || isPlatformAdmin) && (
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
-                <Plus className="h-4 w-4" />
-                Create Indicator
-              </button>
-            )}
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">CDE Indicator Library</h1>
+              <p className="text-sm text-slate-600">
+                60 professional KPIs for Communication, Dissemination & Exploitation in EU-funded projects
+              </p>
+            </div>
+          </div>
+
+          {/* Domain stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+            <button
+              onClick={() => setSelectedDomain(selectedDomain === 'communication' ? 'all' : 'communication')}
+              className={`flex items-center gap-3 p-4 rounded-lg border transition-all ${
+                selectedDomain === 'communication'
+                  ? 'bg-blue-50 border-blue-300 shadow-sm'
+                  : 'bg-white border-slate-200 hover:border-blue-200 hover:bg-blue-50/50'
+              }`}
+            >
+              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                <TrendingUp className="h-5 w-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-2xl font-bold text-slate-900">{domainStats.communication}</div>
+                <div className="text-xs text-slate-600 font-medium">Communication</div>
+              </div>
+            </button>
+            <button
+              onClick={() => setSelectedDomain(selectedDomain === 'dissemination' ? 'all' : 'dissemination')}
+              className={`flex items-center gap-3 p-4 rounded-lg border transition-all ${
+                selectedDomain === 'dissemination'
+                  ? 'bg-green-50 border-green-300 shadow-sm'
+                  : 'bg-white border-slate-200 hover:border-green-200 hover:bg-green-50/50'
+              }`}
+            >
+              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center">
+                <BookOpen className="h-5 w-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-2xl font-bold text-slate-900">{domainStats.dissemination}</div>
+                <div className="text-xs text-slate-600 font-medium">Dissemination</div>
+              </div>
+            </button>
+            <button
+              onClick={() => setSelectedDomain(selectedDomain === 'exploitation' ? 'all' : 'exploitation')}
+              className={`flex items-center gap-3 p-4 rounded-lg border transition-all ${
+                selectedDomain === 'exploitation'
+                  ? 'bg-amber-50 border-amber-300 shadow-sm'
+                  : 'bg-white border-slate-200 hover:border-amber-200 hover:bg-amber-50/50'
+              }`}
+            >
+              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center">
+                <Target className="h-5 w-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-2xl font-bold text-slate-900">{domainStats.exploitation}</div>
+                <div className="text-xs text-slate-600 font-medium">Exploitation</div>
+              </div>
+            </button>
           </div>
         </div>
 
+        {/* Search & Filters */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 mb-6 p-4">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search indicators by name, code, or definition..."
+                placeholder="Search by name, code, or definition..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               />
             </div>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
+              className="px-4 py-2.5 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-sm"
             >
               <Filter className="h-4 w-4" />
               Filters
-              {showFilters && <X className="h-4 w-4" />}
+              <ChevronDown className={`h-4 w-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
             </button>
           </div>
 
@@ -216,7 +196,7 @@ export default function IndicatorLibrary() {
                 <select
                   value={selectedDomain}
                   onChange={(e) => setSelectedDomain(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 >
                   <option value="all">All Domains</option>
                   <option value="communication">Communication</option>
@@ -229,7 +209,7 @@ export default function IndicatorLibrary() {
                 <select
                   value={selectedMaturity}
                   onChange={(e) => setSelectedMaturity(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 >
                   <option value="all">All Levels</option>
                   <option value="basic">Basic</option>
@@ -244,7 +224,7 @@ export default function IndicatorLibrary() {
                     setSelectedDomain('all');
                     setSelectedMaturity('all');
                   }}
-                  className="w-full px-4 py-2 text-slate-600 hover:text-slate-900 transition-colors"
+                  className="w-full px-4 py-2 text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors text-sm"
                 >
                   Clear Filters
                 </button>
@@ -253,63 +233,117 @@ export default function IndicatorLibrary() {
           )}
         </div>
 
-        <div className="mb-4 text-sm text-slate-600">
-          Showing {filteredIndicators.length} of {indicators.length} indicators
+        {/* Result count */}
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-sm text-slate-600">
+            Showing <span className="font-semibold text-slate-900">{filteredIndicators.length}</span> of {INDICATOR_CATALOG.length} indicators
+          </div>
+          {(selectedDomain !== 'all' || selectedMaturity !== 'all' || searchTerm) && (
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedDomain('all');
+                setSelectedMaturity('all');
+              }}
+              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              <X className="h-3 w-3" />
+              Clear all filters
+            </button>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredIndicators.map((indicator) => {
-            const DomainIcon = getDomainIcon(indicator.domain);
-            return (
-              <div
-                key={indicator.indicator_id}
-                onClick={() => setSelectedIndicator(indicator)}
-                className="bg-white rounded-lg border border-slate-200 p-5 hover:shadow-md transition-shadow cursor-pointer"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className={`px-2 py-1 rounded border text-xs font-medium ${getDomainColor(indicator.domain)}`}>
-                    <div className="flex items-center gap-1">
-                      <DomainIcon className="h-3 w-3" />
-                      {formatLabel(indicator.domain)}
+        {/* Grouped indicator cards */}
+        {domainOrder.filter(d => groupedIndicators[d]).map(domain => {
+          const DomainIcon = getDomainIcon(domain);
+          const indicators = groupedIndicators[domain];
+          return (
+            <div key={domain} className="mb-10">
+              {/* Section header (only show when viewing all domains) */}
+              {selectedDomain === 'all' && (
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`h-8 w-8 rounded-lg bg-gradient-to-br ${getDomainHeaderColor(domain)} flex items-center justify-center`}>
+                    <DomainIcon className="h-4 w-4 text-white" />
+                  </div>
+                  <h2 className="text-lg font-semibold text-slate-900">{formatLabel(domain)}</h2>
+                  <span className="text-sm text-slate-500">({indicators.length} indicators)</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {indicators.map((indicator) => (
+                  <div
+                    key={indicator.indicator_id}
+                    onClick={() => setSelectedIndicator(indicator)}
+                    className="bg-white rounded-lg border border-slate-200 p-5 hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className={`px-2 py-1 rounded border text-xs font-medium ${getDomainColor(indicator.domain)}`}>
+                        <div className="flex items-center gap-1">
+                          <DomainIcon className="h-3 w-3" />
+                          {formatLabel(indicator.domain)}
+                        </div>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getMaturityBadge(indicator.maturity_level)}`}>
+                        {formatLabel(indicator.maturity_level)}
+                      </span>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="text-xs font-mono text-slate-400 mb-1">{indicator.code}</div>
+                      <h3 className="text-sm font-semibold text-slate-900 mb-2 group-hover:text-blue-700 transition-colors">
+                        {indicator.name}
+                      </h3>
+                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{indicator.definition}</p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <BarChart3 className="h-3 w-3" />
+                        {formatLabel(indicator.unit)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Layers className="h-3 w-3" />
+                        {formatLabel(indicator.collection_frequency)}
+                      </span>
                     </div>
                   </div>
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${getMaturityBadge(indicator.maturity_level)}`}>
-                    {formatLabel(indicator.maturity_level)}
-                  </span>
-                </div>
-
-                <div className="mb-3">
-                  <div className="text-xs font-mono text-slate-500 mb-1">{indicator.code}</div>
-                  <h3 className="text-base font-semibold text-slate-900 mb-2">{indicator.name}</h3>
-                  <p className="text-sm text-slate-600 line-clamp-3">{indicator.definition}</p>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100">
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>Unit: {formatLabel(indicator.unit)}</span>
-                    <span className="font-medium">Used in {indicator.project_count || 0} projects</span>
-                  </div>
-                </div>
+                ))}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
 
         {filteredIndicators.length === 0 && (
-          <div className="text-center py-12">
-            <Library className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-slate-900 mb-2">No indicators found</h3>
-            <p className="text-slate-600">Try adjusting your search or filter criteria</p>
+          <div className="text-center py-16">
+            <Search className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 mb-2">No indicators match your search</h3>
+            <p className="text-slate-600 mb-4">Try adjusting your search term or clearing the filters</p>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedDomain('all');
+                setSelectedMaturity('all');
+              }}
+              className="px-4 py-2 text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Clear all filters
+            </button>
           </div>
         )}
       </div>
 
+      {/* Detail Modal */}
       {selectedIndicator && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-mono text-slate-500 mb-1">{selectedIndicator.code}</div>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setSelectedIndicator(null)}>
+          <div
+            className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between rounded-t-xl">
+              <div className="flex-1">
+                <div className="text-xs font-mono text-slate-400 mb-1">{selectedIndicator.code}</div>
                 <h2 className="text-xl font-bold text-slate-900">{selectedIndicator.name}</h2>
               </div>
               <button
@@ -321,7 +355,8 @@ export default function IndicatorLibrary() {
             </div>
 
             <div className="p-6 space-y-6">
-              <div className="flex gap-2">
+              {/* Badges */}
+              <div className="flex gap-2 flex-wrap">
                 <span className={`px-3 py-1 rounded border text-sm font-medium ${getDomainColor(selectedIndicator.domain)}`}>
                   {formatLabel(selectedIndicator.domain)}
                 </span>
@@ -330,11 +365,13 @@ export default function IndicatorLibrary() {
                 </span>
               </div>
 
-              <div>
+              {/* Definition */}
+              <div className="bg-slate-50 rounded-lg p-4">
                 <h3 className="text-sm font-semibold text-slate-900 mb-2">Definition</h3>
                 <p className="text-sm text-slate-700 leading-relaxed">{selectedIndicator.definition}</p>
               </div>
 
+              {/* Rationale */}
               {selectedIndicator.rationale && (
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900 mb-2">Rationale</h3>
@@ -342,83 +379,63 @@ export default function IndicatorLibrary() {
                 </div>
               )}
 
+              {/* Limitations */}
               {selectedIndicator.limitations && (
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 mb-2">Limitations</h3>
-                  <p className="text-sm text-slate-700 leading-relaxed">{selectedIndicator.limitations}</p>
+                <div className="bg-amber-50 rounded-lg p-4 border border-amber-100">
+                  <h3 className="text-sm font-semibold text-amber-900 mb-2">Limitations</h3>
+                  <p className="text-sm text-amber-800 leading-relaxed">{selectedIndicator.limitations}</p>
                 </div>
               )}
 
+              {/* Interpretation */}
               {selectedIndicator.interpretation_notes && (
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 mb-2">Interpretation Notes</h3>
-                  <p className="text-sm text-slate-700 leading-relaxed">{selectedIndicator.interpretation_notes}</p>
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-2">Interpretation Notes</h3>
+                  <p className="text-sm text-blue-800 leading-relaxed">{selectedIndicator.interpretation_notes}</p>
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
-                <div>
+              {/* Technical details grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-200">
+                <div className="bg-slate-50 rounded-lg p-3">
                   <div className="text-xs text-slate-500 mb-1">Unit</div>
-                  <div className="text-sm font-medium">{formatLabel(selectedIndicator.unit)}</div>
+                  <div className="text-sm font-semibold text-slate-900">{formatLabel(selectedIndicator.unit)}</div>
                 </div>
-                <div>
+                <div className="bg-slate-50 rounded-lg p-3">
                   <div className="text-xs text-slate-500 mb-1">Aggregation</div>
-                  <div className="text-sm font-medium">{formatLabel(selectedIndicator.aggregation_method)}</div>
+                  <div className="text-sm font-semibold text-slate-900">{formatLabel(selectedIndicator.aggregation_method)}</div>
                 </div>
-                <div>
+                <div className="bg-slate-50 rounded-lg p-3">
                   <div className="text-xs text-slate-500 mb-1">Data Source</div>
-                  <div className="text-sm font-medium">{formatLabel(selectedIndicator.data_source)}</div>
+                  <div className="text-sm font-semibold text-slate-900">{formatLabel(selectedIndicator.data_source)}</div>
                 </div>
-                <div>
-                  <div className="text-xs text-slate-500 mb-1">Collection Frequency</div>
-                  <div className="text-sm font-medium">{formatLabel(selectedIndicator.collection_frequency || 'Not specified')}</div>
-                </div>
-              </div>
-
-              {selectedIndicator.objective_types && selectedIndicator.objective_types.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 mb-2">Objective Types</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedIndicator.objective_types.map(type => (
-                      <span key={type} className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
-                        {formatLabel(type)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {selectedIndicator.channels && selectedIndicator.channels.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 mb-2">Channels</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedIndicator.channels.map(channel => (
-                      <span key={channel} className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-                        {formatLabel(channel)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {selectedIndicator.stakeholders && selectedIndicator.stakeholders.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 mb-2">Stakeholder Types</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedIndicator.stakeholders.map(stakeholder => (
-                      <span key={stakeholder} className="px-2 py-1 bg-amber-50 text-amber-700 rounded text-xs">
-                        {formatLabel(stakeholder)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-4 border-t border-slate-200">
-                <div className="text-sm text-slate-600">
-                  Currently used in <span className="font-semibold">{selectedIndicator.project_count || 0}</span> projects
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <div className="text-xs text-slate-500 mb-1">Frequency</div>
+                  <div className="text-sm font-semibold text-slate-900">{formatLabel(selectedIndicator.collection_frequency)}</div>
                 </div>
               </div>
+
+              {/* Default values */}
+              {(selectedIndicator.default_baseline !== null || selectedIndicator.default_target !== null) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {selectedIndicator.default_baseline !== null && (
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <div className="text-xs text-slate-500 mb-1">Suggested Baseline</div>
+                      <div className="text-lg font-bold text-slate-900">
+                        {selectedIndicator.default_baseline.toLocaleString()} <span className="text-xs font-normal text-slate-500">{selectedIndicator.unit}</span>
+                      </div>
+                    </div>
+                  )}
+                  {selectedIndicator.default_target !== null && (
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <div className="text-xs text-slate-500 mb-1">Suggested Target</div>
+                      <div className="text-lg font-bold text-blue-700">
+                        {selectedIndicator.default_target.toLocaleString()} <span className="text-xs font-normal text-slate-500">{selectedIndicator.unit}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

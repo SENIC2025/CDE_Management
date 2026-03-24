@@ -10,6 +10,7 @@ import {
   canUpdate,
   canDelete,
   canCreateProject,
+  canManageProject,
   Permission,
 } from '../lib/rbac';
 
@@ -28,5 +29,6 @@ export function usePermissions() {
     canChangeReportStatus: (currentStatus: string) => canChangeReportStatus(userRole, currentStatus),
     canManageTemplates: () => canManageTemplates(userRole),
     canManageComplianceRules: () => canManageComplianceRules(userRole),
+    canManageProject: () => canManageProject(userRole),
   };
 }

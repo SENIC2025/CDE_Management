@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useProject } from '../contexts/ProjectContext';
-import { Plus, Search, Filter, BookmarkPlus, BarChart3, Users as UsersIcon } from 'lucide-react';
+import { Plus, Search, Filter, BookmarkPlus, BarChart3, Users as UsersIcon, X, Upload } from 'lucide-react';
+import { PageHeader, PageSkeleton, ConfirmDialog, CopyLinkButton, ShareButton } from '../components/ui';
+import useConfirm from '../hooks/useConfirm';
+import useDeepLink from '../hooks/useDeepLink';
 import StakeholderResponsiveness from '../components/StakeholderResponsiveness';
 import StakeholderSetupWizard, { type StakeholderFormData } from '../components/stakeholders/StakeholderSetupWizard';
 import StakeholderCard from '../components/stakeholders/StakeholderCard';
 import { getCategoryLabel, type StakeholderCategory } from '../lib/stakeholderLibrary';
+import ImportWizard from '../components/import/ImportWizard';
+import { STAKEHOLDER_IMPORT_CONFIG } from '../lib/importConfigs/stakeholderImport';
+import type { ImportSummary } from '../lib/importEngine';
 
 interface StakeholderGroup {
   id: string;
@@ -69,11 +75,21 @@ const PRESET_VIEWS: SavedView[] = [
 
 export default function Stakeholders() {
   const { currentProject } = useProject();
+  const [confirmProps, confirm] = useConfirm();
   const [activeTab, setActiveTab] = useState<'groups' | 'responsiveness'>('groups');
   const [stakeholders, setStakeholders] = useState<StakeholderGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingStakeholder, setEditingStakeholder] = useState<StakeholderGroup | null>(null);
+
+  // Deep link support: ?view=<stakeholderId>
+  const { openItem, closeItem, copyDeepLink } = useDeepLink({
+    items: stakeholders,
+    onOpen: setEditingStakeholder,
+    onClose: () => setEditingStakeholder(null),
+    loading,
+  });
 
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
@@ -152,7 +168,8 @@ export default function Stakeholders() {
   };
 
   const handleDeleteStakeholder = async (id: string) => {
-    if (!confirm('Delete this stakeholder? This action cannot be undone.')) return;
+    const ok = await confirm({ title: 'Delete stakeholder?', message: 'This stakeholder and all related engagement data will be permanently removed.' });
+    if (!ok) return;
 
     try {
       const { error } = await supabase
@@ -250,21 +267,33 @@ export default function Stakeholders() {
     );
   }
 
+  if (loading && stakeholders.length === 0) return <PageSkeleton />;
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Stakeholder Management</h1>
-          <p className="text-gray-600 mt-1">Manage stakeholder groups and engagement strategy</p>
-        </div>
-        <button
-          onClick={() => setShowWizard(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span>Add Stakeholder</span>
-        </button>
-      </div>
+      <PageHeader
+        icon={UsersIcon}
+        title="Stakeholder Management"
+        subtitle="Manage stakeholder groups and engagement strategy"
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="flex items-center gap-2 bg-white text-[#1BAE70] border border-[#1BAE70] px-4 py-2.5 rounded-lg hover:bg-[#1BAE70]/5 font-medium transition-colors"
+            >
+              <Upload size={18} />
+              Import
+            </button>
+            <button
+              onClick={() => setShowWizard(true)}
+              className="flex items-center gap-2 bg-[#1BAE70] text-white px-4 py-2.5 rounded-lg hover:bg-[#06752E] font-medium transition-colors"
+            >
+              <Plus size={18} />
+              Add Stakeholder
+            </button>
+          </div>
+        }
+      />
 
       <div className="flex gap-2 border-b">
         <button
@@ -484,7 +513,7 @@ export default function Stakeholders() {
                   stakeholder={stakeholder}
                   onUpdate={handleUpdateStakeholder}
                   onDelete={handleDeleteStakeholder}
-                  onEdit={setEditingStakeholder}
+                  onEdit={(s: StakeholderGroup) => openItem(s)}
                 />
               ))}
             </div>
@@ -504,32 +533,160 @@ export default function Stakeholders() {
         />
       )}
 
+      {showImport && currentProject && (
+        <ImportWizard
+          config={STAKEHOLDER_IMPORT_CONFIG}
+          projectId={currentProject.id}
+          onClose={() => setShowImport(false)}
+          onComplete={(summary: ImportSummary) => {
+            // Refresh stakeholder list after import
+            loadStakeholders();
+          }}
+        />
+      )}
+
       {editingStakeholder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-center justify-between">
-              <h3 className="text-xl font-bold text-gray-900">Edit Stakeholder</h3>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Edit Stakeholder</h3>
+                <div className="flex items-center gap-2 mt-2">
+                  <CopyLinkButton itemId={editingStakeholder.id} onCopy={copyDeepLink} />
+                  {currentProject && (
+                    <ShareButton
+                      entityType="stakeholder"
+                      entityId={editingStakeholder.id}
+                      projectId={currentProject.id}
+                      entityTitle={editingStakeholder.name}
+                    />
+                  )}
+                </div>
+              </div>
               <button
-                onClick={() => setEditingStakeholder(null)}
+                onClick={closeItem}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
-            <div className="p-6">
-              <p className="text-sm text-gray-600 mb-4">
-                Use inline editing on the card for quick changes. Full editing panel coming soon.
-              </p>
-              <button
-                onClick={() => setEditingStakeholder(null)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-              >
-                Close
-              </button>
-            </div>
+            <form
+              className="p-6 space-y-5"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = e.target as HTMLFormElement;
+                const formData = new FormData(form);
+                const updates: Partial<StakeholderGroup> = {
+                  name: formData.get('name') as string,
+                  description: formData.get('description') as string,
+                  role: formData.get('role') as string,
+                  level: formData.get('level') as string,
+                  priority_score: Number(formData.get('priority_score')),
+                  capacity_to_act: formData.get('capacity_to_act') as string,
+                };
+                await handleUpdateStakeholder(editingStakeholder.id, updates);
+                closeItem();
+              }}
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                <input
+                  name="name"
+                  required
+                  defaultValue={editingStakeholder.name}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  name="description"
+                  rows={3}
+                  defaultValue={editingStakeholder.description || ''}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category / Role</label>
+                  <select
+                    name="role"
+                    defaultValue={editingStakeholder.role || 'custom'}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="policy">Policy Makers</option>
+                    <option value="market">Market / Industry</option>
+                    <option value="research">Research Community</option>
+                    <option value="society">Civil Society</option>
+                    <option value="media">Media</option>
+                    <option value="funders">Funders</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                  <select
+                    name="level"
+                    defaultValue={editingStakeholder.level || 'national'}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="EU">EU</option>
+                    <option value="national">National</option>
+                    <option value="regional">Regional</option>
+                    <option value="local">Local</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority Score (0-10)</label>
+                  <input
+                    name="priority_score"
+                    type="number"
+                    min={0}
+                    max={10}
+                    step={1}
+                    defaultValue={editingStakeholder.priority_score ?? 5}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">9-10 Primary | 6-8 Secondary | 0-5 Observational</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Capacity to Act</label>
+                  <input
+                    name="capacity_to_act"
+                    defaultValue={editingStakeholder.capacity_to_act || ''}
+                    placeholder="e.g., High influence, low awareness"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={closeItem}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

@@ -131,11 +131,10 @@ export default function WorkQueueTab({
                   <div className="flex items-start space-x-3 flex-1">
                     <TrendingUp className="w-5 h-5 text-gray-400 mt-1" />
                     <div className="flex-1">
-                      <div className="font-medium text-gray-900">{indicator.name}</div>
+                      <div className="font-medium text-gray-900">{indicator.title}</div>
                       <div className="text-sm text-gray-600 mt-1">
-                        <span className="font-medium">Unit:</span> {indicator.unit} |
-                        <span className="font-medium ml-2">Baseline:</span> {indicator.baseline} |
-                        <span className="font-medium ml-2">Target:</span> {indicator.target}
+                        <span className="font-medium">Unit:</span> {indicator.measurement_unit} |
+                        <span className="font-medium ml-2">Target:</span> {indicator.target_value}
                       </div>
                     </div>
                   </div>
@@ -173,7 +172,7 @@ export default function WorkQueueTab({
                   <div className="flex items-start space-x-3 flex-1">
                     <TrendingUp className="w-5 h-5 text-gray-400 mt-1" />
                     <div className="flex-1">
-                      <div className="font-medium text-gray-900">{indicator.name}</div>
+                      <div className="font-medium text-gray-900">{indicator.title}</div>
                       <div className="text-xs text-amber-600 mt-1">Value logged, but missing evidence documentation</div>
                     </div>
                   </div>
@@ -211,7 +210,7 @@ export default function WorkQueueTab({
                   <TrendingUp className="w-5 h-5 text-gray-400 mt-1" />
                   <div className="flex-1">
                     <div className="flex items-center space-x-2">
-                      <div className="font-medium text-gray-900">{indicator.name}</div>
+                      <div className="font-medium text-gray-900">{indicator.title}</div>
                       <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded">Locked</span>
                     </div>
                     <div className="text-sm text-gray-600 mt-1">Requires admin action to update</div>

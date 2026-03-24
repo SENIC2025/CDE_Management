@@ -1,128 +1,157 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, Save, Check, AlertCircle, Sparkles } from 'lucide-react';
-import { projectObjectivesService, type ProjectObjective } from '../../lib/projectObjectivesService';
-import { objectiveLibraryService } from '../../lib/objectiveLibraryService';
+import { useState, useCallback, useEffect } from 'react';
+import { X, Save, Check, AlertCircle } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { type ProjectObjective } from '../../lib/projectObjectivesService';
 
 interface ObjectiveEditPanelProps {
-  projectId: string;
   objective: ProjectObjective;
   onClose: () => void;
   onUpdate: () => void;
+  deepLinkActions?: React.ReactNode;
 }
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
 
-export default function ObjectiveEditPanel({ projectId, objective, onClose, onUpdate }: ObjectiveEditPanelProps) {
-  const [activeTab, setActiveTab] = useState<'details' | 'kpis' | 'activities'>('details');
+const MEANS_OF_VERIFICATION = [
+  'Website analytics reports',
+  'Social media engagement metrics',
+  'Event attendance records',
+  'Publication download counts',
+  'Media coverage clippings',
+  'Survey results and feedback',
+  'Stakeholder meeting minutes',
+  'Newsletter subscription data',
+  'Citation and reference tracking',
+  'Training participation records',
+  'Partnership agreements signed',
+  'Policy briefs distributed',
+  'Conference presentations delivered',
+  'Peer-reviewed publications',
+  'Patent or IP filings',
+  'Licensing agreements',
+  'Pilot deployment reports',
+  'User adoption statistics',
+  'Impact assessment reports',
+  'External evaluation reports',
+];
+
+const STATUS_OPTIONS = [
+  { value: 'draft', label: 'Draft', description: 'Initial planning phase' },
+  { value: 'planned', label: 'Planned', description: 'Approved and scheduled' },
+  { value: 'in_progress', label: 'In Progress', description: 'Currently being implemented' },
+  { value: 'completed', label: 'Completed', description: 'Fully achieved' },
+  { value: 'on_hold', label: 'On Hold', description: 'Temporarily paused' },
+];
+
+export default function ObjectiveEditPanel({ objective, onClose, onUpdate, deepLinkActions }: ObjectiveEditPanelProps) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  const [priority, setPriority] = useState(objective.priority);
-  const [stakeholderTypes, setStakeholderTypes] = useState(objective.stakeholder_types);
-  const [timeHorizon, setTimeHorizon] = useState(objective.time_horizon);
+  const [title, setTitle] = useState(objective.title || '');
+  const [description, setDescription] = useState(objective.description || '');
+  const [domain, setDomain] = useState<string>(objective.domain || 'communication');
+  const [priority, setPriority] = useState(objective.priority || 'medium');
+  const [status, setStatus] = useState(objective.status || 'draft');
   const [notes, setNotes] = useState(objective.notes || '');
+  const [targetDate, setTargetDate] = useState(objective.target_date ? objective.target_date.split('T')[0] : '');
+  const [responsiblePerson, setResponsiblePerson] = useState(objective.responsible_person || '');
 
-  const [suggestions, setSuggestions] = useState<any>(null);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  // Parse means_of_verification from jsonb array
+  const existingMoV: string[] = Array.isArray(objective.means_of_verification)
+    ? objective.means_of_verification
+    : [];
 
-  useEffect(() => {
-    if (objective.objective_lib_id) {
-      loadSuggestions();
+  // Separate preset and custom MoV entries
+  const presetMoV = existingMoV.filter(m => MEANS_OF_VERIFICATION.includes(m));
+  const customMoVEntries = existingMoV.filter(m => !MEANS_OF_VERIFICATION.includes(m));
+
+  const [selectedMoV, setSelectedMoV] = useState<string[]>(presetMoV);
+  const [showOtherMoV, setShowOtherMoV] = useState(customMoVEntries.length > 0);
+  const [otherMoV, setOtherMoV] = useState(customMoVEntries.join(', '));
+
+  const buildMeansOfVerification = (): string[] => {
+    const movList = [...selectedMoV];
+    if (showOtherMoV && otherMoV.trim()) {
+      movList.push(otherMoV.trim());
     }
-  }, [objective.objective_lib_id]);
+    return movList;
+  };
 
-  const loadSuggestions = async () => {
-    if (!objective.objective_lib_id) return;
-
-    try {
-      setLoadingSuggestions(true);
-      const data = await objectiveLibraryService.getSuggestions(objective.objective_lib_id);
-      setSuggestions(data);
-    } catch (err) {
-      console.error('[ObjectiveEdit] Error loading suggestions:', err);
-    } finally {
-      setLoadingSuggestions(false);
-    }
+  const toggleMoV = (mov: string) => {
+    setSelectedMoV(prev =>
+      prev.includes(mov) ? prev.filter(m => m !== mov) : [...prev, mov]
+    );
   };
 
   const saveChanges = useCallback(async () => {
     try {
       setSaveStatus('saving');
 
-      await projectObjectivesService.updateObjective(objective.objective_id, {
-        priority,
-        stakeholder_types: stakeholderTypes,
-        time_horizon: timeHorizon,
-        notes: notes || null
-      });
+      const { error } = await supabase
+        .from('project_objectives')
+        .update({
+          title,
+          description: description || null,
+          domain,
+          priority,
+          status,
+          notes: notes || null,
+          means_of_verification: buildMeansOfVerification(),
+          target_date: targetDate || null,
+          responsible_person: responsiblePerson.trim() || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', objective.id);
+
+      if (error) throw error;
 
       setSaveStatus('saved');
       setLastSaved(new Date());
-
-      setTimeout(() => {
-        setSaveStatus('idle');
-      }, 2000);
+      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (err) {
       console.error('[ObjectiveEdit] Error saving:', err);
       setSaveStatus('failed');
     }
-  }, [objective.objective_id, priority, stakeholderTypes, timeHorizon, notes]);
+  }, [objective.id, title, description, domain, priority, status, notes, selectedMoV, otherMoV, showOtherMoV, targetDate, responsiblePerson]);
 
+  // Auto-save after 1.5 seconds of inactivity
   useEffect(() => {
+    const currentMoV = buildMeansOfVerification();
+    const originalMoV = existingMoV;
+
+    const hasChanges =
+      title !== (objective.title || '') ||
+      description !== (objective.description || '') ||
+      domain !== (objective.domain || 'communication') ||
+      priority !== (objective.priority || 'medium') ||
+      status !== (objective.status || 'draft') ||
+      notes !== (objective.notes || '') ||
+      targetDate !== (objective.target_date ? objective.target_date.split('T')[0] : '') ||
+      responsiblePerson !== (objective.responsible_person || '') ||
+      JSON.stringify(currentMoV.sort()) !== JSON.stringify(originalMoV.sort());
+
+    if (!hasChanges) return;
+
     const timer = setTimeout(() => {
-      if (
-        priority !== objective.priority ||
-        JSON.stringify(stakeholderTypes) !== JSON.stringify(objective.stakeholder_types) ||
-        timeHorizon !== objective.time_horizon ||
-        notes !== (objective.notes || '')
-      ) {
-        saveChanges();
-      }
-    }, 1000);
+      saveChanges();
+    }, 1500);
 
     return () => clearTimeout(timer);
-  }, [priority, stakeholderTypes, timeHorizon, notes, saveChanges]);
+  }, [title, description, domain, priority, status, notes, targetDate, responsiblePerson, selectedMoV, otherMoV, showOtherMoV, saveChanges]);
 
-  const handleApplyKPIs = async () => {
-    try {
-      const result = await projectObjectivesService.applyKPISuggestions(projectId, objective.objective_id);
-
-      const message = result.bundle_applied
-        ? `Applied KPI bundle and ${result.kpis_added} additional indicators`
-        : `Applied ${result.kpis_added} suggested indicators`;
-
-      const skipMessage = result.kpis_skipped > 0
-        ? ` (${result.kpis_skipped} already existed)`
-        : '';
-
-      alert(message + skipMessage);
-      onUpdate();
-    } catch (err: any) {
-      console.error('[ObjectiveEdit] Error applying KPIs:', err);
-      alert(err?.message || 'Failed to apply KPI suggestions');
-    }
+  const handleDone = () => {
+    onUpdate();
+    onClose();
   };
-
-  const stakeholderOptions = [
-    'policymakers',
-    'practitioners',
-    'researchers',
-    'industry',
-    'civil_society',
-    'public',
-    'consortium',
-    'educators',
-    'students',
-    'media'
-  ];
 
   return (
     <div className="fixed inset-0 bg-gray-900/50 flex items-end justify-end z-50">
       <div className="bg-white w-full max-w-2xl h-full shadow-xl flex flex-col">
+        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex-1">
-            <h2 className="text-2xl font-bold text-gray-900">Edit Objective</h2>
-            <p className="text-sm text-gray-600 mt-1">{objective.title}</p>
+            <h2 className="text-xl font-bold text-gray-900">Edit Objective</h2>
+            {deepLinkActions && <div className="mt-2">{deepLinkActions}</div>}
           </div>
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2 text-sm">
@@ -144,6 +173,7 @@ export default function ObjectiveEditPanel({ projectId, objective, onClose, onUp
                 <>
                   <AlertCircle className="w-4 h-4 text-red-600" />
                   <span className="text-red-600">Failed to save</span>
+                  <button onClick={saveChanges} className="text-blue-600 hover:underline ml-2">Retry</button>
                 </>
               )}
             </div>
@@ -156,210 +186,210 @@ export default function ObjectiveEditPanel({ projectId, objective, onClose, onUp
           </div>
         </div>
 
-        <div className="border-b border-gray-200">
-          <div className="flex space-x-6 px-6">
-            <button
-              onClick={() => setActiveTab('details')}
-              className={`px-1 py-4 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'details'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Details
-            </button>
-            <button
-              onClick={() => setActiveTab('kpis')}
-              className={`px-1 py-4 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'kpis'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              KPIs
-            </button>
-            <button
-              onClick={() => setActiveTab('activities')}
-              className={`px-1 py-4 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'activities'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Activities
-            </button>
+        {/* Form */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Title <span className="text-red-600">*</span>
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Domain</label>
+              <select
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="communication">Communication</option>
+                <option value="dissemination">Dissemination</option>
+                <option value="exploitation">Exploitation</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {STATUS_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                {STATUS_OPTIONS.find(o => o.value === status)?.description}
+              </p>
+            </div>
+          </div>
+
+          {/* Target Date & Responsible Person */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Target Date</label>
+              <input
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">When should this objective be achieved?</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Responsible Person</label>
+              <input
+                type="text"
+                value={responsiblePerson}
+                onChange={(e) => setResponsiblePerson(e.target.value)}
+                placeholder="e.g., WP3 Lead, Communications Officer"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Who is driving this objective?</p>
+            </div>
+          </div>
+
+          {/* Means of Verification */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Means of Verification
+            </label>
+            <p className="text-xs text-gray-500 mb-3">
+              Select methods to verify achievement of this objective
+            </p>
+            <div className="grid grid-cols-2 gap-2 max-h-[240px] overflow-y-auto border border-gray-200 rounded-lg p-3">
+              {MEANS_OF_VERIFICATION.map((mov) => {
+                const isSelected = selectedMoV.includes(mov);
+                return (
+                  <button
+                    key={mov}
+                    type="button"
+                    onClick={() => toggleMoV(mov)}
+                    className={`flex items-center text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                      isSelected
+                        ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                        : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded border mr-2 flex-shrink-0 flex items-center justify-center ${
+                      isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'
+                    }`}>
+                      {isSelected && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                    <span className="leading-tight">{mov}</span>
+                  </button>
+                );
+              })}
+
+              {/* Other option */}
+              <button
+                type="button"
+                onClick={() => setShowOtherMoV(!showOtherMoV)}
+                className={`flex items-center text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  showOtherMoV
+                    ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                    : 'bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded border mr-2 flex-shrink-0 flex items-center justify-center ${
+                  showOtherMoV ? 'bg-blue-600 border-blue-600' : 'border-gray-300'
+                }`}>
+                  {showOtherMoV && <Check className="w-3 h-3 text-white" />}
+                </div>
+                <span className="leading-tight">Other (specify below)</span>
+              </button>
+            </div>
+
+            {showOtherMoV && (
+              <div className="mt-3">
+                <input
+                  type="text"
+                  value={otherMoV}
+                  onChange={(e) => setOtherMoV(e.target.value)}
+                  placeholder="Describe your verification method..."
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            )}
+
+            {selectedMoV.length > 0 && (
+              <p className="text-xs text-blue-600 mt-2">
+                {selectedMoV.length} method{selectedMoV.length > 1 ? 's' : ''} selected
+                {showOtherMoV && otherMoV.trim() ? ' + 1 custom' : ''}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add any project-specific notes..."
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 text-sm text-gray-500">
+            <p>Created: {new Date(objective.created_at).toLocaleDateString()}</p>
+            {objective.updated_at && (
+              <p>Last updated: {new Date(objective.updated_at).toLocaleDateString()}</p>
+            )}
+            {objective.source && objective.source !== 'manual' && (
+              <p className="capitalize">Source: {objective.source}</p>
+            )}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {activeTab === 'details' && (
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
-                <select
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Time Horizon</label>
-                <select
-                  value={timeHorizon}
-                  onChange={(e) => setTimeHorizon(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="short">Short term (0-12 months)</option>
-                  <option value="medium">Medium term (1-2 years)</option>
-                  <option value="long">Long term (2+ years)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Target Stakeholder Groups</label>
-                <div className="flex flex-wrap gap-2">
-                  {stakeholderOptions.map((stakeholder) => {
-                    const isSelected = stakeholderTypes.includes(stakeholder);
-                    return (
-                      <button
-                        key={stakeholder}
-                        type="button"
-                        onClick={() => {
-                          const updated = isSelected
-                            ? stakeholderTypes.filter((s) => s !== stakeholder)
-                            : [...stakeholderTypes, stakeholder];
-                          setStakeholderTypes(updated);
-                        }}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isSelected
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        {stakeholder.replace(/_/g, ' ')}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Project-Specific Notes</label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Add any project-specific context or customization notes..."
-                  rows={4}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              <div className="pt-4 border-t border-gray-200">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Domain:</span>
-                    <span className="ml-2 font-medium capitalize">{objective.domain}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Outcome Type:</span>
-                    <span className="ml-2 font-medium capitalize">{objective.outcome_type.replace(/_/g, ' ')}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Source:</span>
-                    <span className="ml-2 font-medium capitalize">{objective.source}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Status:</span>
-                    <span className="ml-2 font-medium capitalize">{objective.status.replace(/_/g, ' ')}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'kpis' && (
-            <div className="space-y-6">
-              {suggestions && (suggestions.kpi_bundle_id || suggestions.indicator_codes.length > 0) && (
-                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                  <div className="flex items-start space-x-3 mb-3">
-                    <Sparkles className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <h4 className="font-medium text-purple-900 mb-1">KPI Suggestions Available</h4>
-                      <p className="text-sm text-purple-700">
-                        This objective has {suggestions.indicator_codes.length} suggested KPI indicators
-                        {suggestions.kpi_bundle_id && ' and a recommended KPI bundle'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleApplyKPIs}
-                    className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
-                  >
-                    Apply KPI Suggestions Now
-                  </button>
-                </div>
-              )}
-
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3">Linked KPIs</h4>
-                <div className="bg-gray-50 rounded-lg p-4 text-center">
-                  <div className="text-3xl font-bold text-gray-900 mb-2">{objective.kpis_linked_count}</div>
-                  <p className="text-sm text-gray-600">KPIs currently linked to this project</p>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Visit the Monitoring page to view and manage all project KPIs
-                  </p>
-                </div>
-              </div>
-
-              {suggestions && suggestions.channel_types.length > 0 && (
-                <div className="pt-4 border-t">
-                  <h4 className="font-medium text-gray-900 mb-3">Suggested Channels</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {suggestions.channel_types.map((channel: string, idx: number) => (
-                      <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm">
-                        {channel.replace(/_/g, ' ')}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'activities' && (
-            <div className="space-y-6">
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3">Linked Activities</h4>
-                <div className="bg-gray-50 rounded-lg p-4 text-center">
-                  <div className="text-3xl font-bold text-gray-900 mb-2">{objective.activities_linked_count}</div>
-                  <p className="text-sm text-gray-600">Activities currently linked to this project</p>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Visit the Activities page to create and manage project activities
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
-                  Activities can be planned and executed to achieve this objective. Use the CDE Strategy Builder
-                  to generate planned activities based on your strategic approach.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-gray-200 p-6">
+        {/* Footer */}
+        <div className="border-t border-gray-200 p-6 flex items-center justify-between">
           <button
-            onClick={onClose}
-            className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+            onClick={saveChanges}
+            disabled={saveStatus === 'saving'}
+            className="flex items-center space-x-2 px-4 py-2 text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50"
           >
-            Close
+            <Save className="w-4 h-4" />
+            <span>Save Now</span>
+          </button>
+          <button
+            onClick={handleDone}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+          >
+            Done
           </button>
         </div>
       </div>

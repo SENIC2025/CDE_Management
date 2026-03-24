@@ -5,6 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useOrganisation } from '../contexts/OrganisationContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { logAuditEvent } from '../lib/audit';
+import { useFormPersistence } from '../hooks/useFormPersistence';
+import DraftBanner from '../components/DraftBanner';
 import {
   OnboardingStatus,
   OnboardingChecklist,
@@ -38,30 +40,43 @@ export default function Onboarding() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
-  const [activeStep, setActiveStep] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
 
-  const [projectForm, setProjectForm] = useState({
-    title: '',
-    description: '',
-    programme_profile: 'Custom',
-    start_date: '',
-    end_date: '',
+  // --- Persisted form state: survives page refresh ---
+  const [onboardingDraft, setOnboardingDraft, draftHelpers] = useFormPersistence('onboarding-wizard', {
+    activeStep: 0,
+    projectForm: {
+      title: '',
+      description: '',
+      programme_profile: 'Custom',
+      start_date: '',
+      end_date: '',
+    },
+    reportingPeriods: [] as Array<{
+      id: string;
+      label: string;
+      start_date: string;
+      end_date: string;
+    }>,
+    selectedTemplatePack: '',
+    decisionSupportForm: {
+      hourly_rate: 50,
+      evidence_threshold: 0.7,
+      uptake_window_days: 180,
+    },
   });
 
-  const [reportingPeriods, setReportingPeriods] = useState<Array<{
-    id: string;
-    label: string;
-    start_date: string;
-    end_date: string;
-  }>>([]);
-
-  const [selectedTemplatePack, setSelectedTemplatePack] = useState<string>('');
-  const [decisionSupportForm, setDecisionSupportForm] = useState({
-    hourly_rate: 50,
-    evidence_threshold: 0.7,
-    uptake_window_days: 180,
-  });
+  // Convenience getters/setters that update the persisted draft
+  const activeStep = onboardingDraft.activeStep;
+  const setActiveStep = (step: number) => setOnboardingDraft(prev => ({ ...prev, activeStep: step }));
+  const projectForm = onboardingDraft.projectForm;
+  const setProjectForm = (form: typeof onboardingDraft.projectForm) => setOnboardingDraft(prev => ({ ...prev, projectForm: form }));
+  const reportingPeriods = onboardingDraft.reportingPeriods;
+  const setReportingPeriods = (periods: typeof onboardingDraft.reportingPeriods) => setOnboardingDraft(prev => ({ ...prev, reportingPeriods: periods }));
+  const selectedTemplatePack = onboardingDraft.selectedTemplatePack;
+  const setSelectedTemplatePack = (pack: string) => setOnboardingDraft(prev => ({ ...prev, selectedTemplatePack: pack }));
+  const decisionSupportForm = onboardingDraft.decisionSupportForm;
+  const setDecisionSupportForm = (form: typeof onboardingDraft.decisionSupportForm) => setOnboardingDraft(prev => ({ ...prev, decisionSupportForm: form }));
 
   useEffect(() => {
     if (currentOrg?.id) {
@@ -195,14 +210,11 @@ export default function Onboarding() {
 
       await updateChecklistItem('project_created', true);
       await loadProjects();
-      setProjectForm({
-        title: '',
-        description: '',
-        programme_profile: 'Custom',
-        start_date: '',
-        end_date: '',
-      });
-      setActiveStep(2);
+      setOnboardingDraft(prev => ({
+        ...prev,
+        projectForm: { title: '', description: '', programme_profile: 'Custom', start_date: '', end_date: '' },
+        activeStep: 2,
+      }));
     } catch (error: any) {
       console.error('Error creating project:', error);
       alert('Failed to create project: ' + error.message);
@@ -332,6 +344,22 @@ export default function Onboarding() {
         </h1>
         <p className="text-slate-600 mt-1">Complete these steps to get started in 15 minutes</p>
       </div>
+
+      <DraftBanner
+        wasRestored={draftHelpers.wasRestored}
+        lastSaved={draftHelpers.lastSaved}
+        onDiscard={() => {
+          draftHelpers.clearSaved();
+          setOnboardingDraft({
+            activeStep: 0,
+            projectForm: { title: '', description: '', programme_profile: 'Custom', start_date: '', end_date: '' },
+            reportingPeriods: [],
+            selectedTemplatePack: '',
+            decisionSupportForm: { hourly_rate: 50, evidence_threshold: 0.7, uptake_window_days: 180 },
+          });
+        }}
+        formName="Setup Wizard"
+      />
 
       <div className="bg-white rounded-lg shadow p-6">
         <div className="flex items-center justify-between mb-4">

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Check, Clock, AlertCircle } from 'lucide-react';
 import { strategyService, type CDEStrategy } from '../lib/strategyService';
 import { useProject } from '../contexts/ProjectContext';
+import { useTabMemory } from '../hooks/useSessionMemory';
 import TemplateSelectionStep from './strategy/TemplateSelectionStep';
 import StrategySummaryStep from './strategy/StrategySummaryStep';
 
@@ -13,7 +14,15 @@ type SaveStatus = 'saved' | 'saving' | 'failed' | 'idle';
 
 export default function StrategyBuilder({ onClose }: StrategyBuilderProps) {
   const { currentProject } = useProject();
-  const [currentStep, setCurrentStep] = useState(1);
+  const [savedStep, saveStep] = useTabMemory('strategy-builder', '1');
+  const [currentStep, setCurrentStepInternal] = useState(parseInt(savedStep) || 1);
+  const setCurrentStep = (step: number | ((prev: number) => number)) => {
+    setCurrentStepInternal(prev => {
+      const next = typeof step === 'function' ? step(prev) : step;
+      saveStep(String(next));
+      return next;
+    });
+  };
   const [strategy, setStrategy] = useState<CDEStrategy | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');

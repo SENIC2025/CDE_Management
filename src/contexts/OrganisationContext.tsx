@@ -8,12 +8,6 @@ interface Organisation {
   created_at: string;
 }
 
-interface OrganisationMember {
-  org_id: string;
-  role: string;
-  organisation: Organisation;
-}
-
 interface OrganisationContextType {
   organisations: Organisation[];
   currentOrg: Organisation | null;
@@ -32,7 +26,7 @@ interface OrganisationContextType {
 const OrganisationContext = createContext<OrganisationContextType | undefined>(undefined);
 
 export function OrganisationProvider({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
   const [currentOrg, setCurrentOrgState] = useState<Organisation | null>(null);
   const [currentOrgRole, setCurrentOrgRole] = useState<string | null>(null);
@@ -41,213 +35,226 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   const [provisioningError, setProvisioningError] = useState<string | null>(null);
   const [firstProjectId, setFirstProjectId] = useState<string | null>(null);
 
+  // Load organisations when user is authenticated
+  // Works with OR without a profile row — the RPC handles both cases
   useEffect(() => {
-    if (user && profile) {
+    if (user) {
       loadOrganisations();
     } else {
+      setOrganisations([]);
+      setCurrentOrgState(null);
+      setCurrentOrgRole(null);
       setLoading(false);
     }
   }, [user, profile]);
 
   async function loadOrganisations() {
     try {
-      if (!profile?.id) {
-        console.log('[OrganisationContext] No profile ID, skipping org load');
+      console.log('[OrgContext] Loading organisations...');
+      console.log('[OrgContext] user:', user?.id, 'profile:', profile?.id || 'null', 'org_id:', profile?.org_id || 'null');
+
+      // Use list_my_organisations RPC (SECURITY DEFINER — bypasses all RLS)
+      // This is the ONLY reliable way to load orgs because the organisations
+      // table has RLS enabled without SELECT policies in the base schema.
+      const { data: rpcOrgs, error: rpcError } = await supabase.rpc('list_my_organisations');
+
+      if (rpcError) {
+        console.error('[OrgContext] list_my_organisations RPC failed:', rpcError.message, rpcError.code, rpcError.details);
+        // Don't throw — just set empty state. User can click "Setup" button.
+        setOrganisations([]);
         setLoading(false);
         return;
       }
 
-      console.log('[OrganisationContext] Loading organisations for user:', profile.id);
-      const { data: memberships, error } = await supabase
-        .from('organisation_members')
-        .select(`
-          org_id,
-          role,
-          organisations:org_id (
-            id,
-            name,
-            created_at
-          )
-        `)
-        .eq('user_id', profile.id);
+      const orgs: Organisation[] = (rpcOrgs || []).map((o: any) => ({
+        id: o.org_id,
+        name: o.org_name,
+        created_at: o.member_since,
+      }));
 
-      if (error) throw error;
+      console.log('[OrgContext] Found', orgs.length, 'organisations');
+      setOrganisations(orgs);
 
-      const orgs = memberships
-        ?.map((m: any) => m.organisations)
-        .filter(Boolean) as Organisation[];
-
-      console.log('[OrganisationContext] Found', orgs?.length || 0, 'organisations');
-      setOrganisations(orgs || []);
-
-      if (orgs && orgs.length > 0) {
+      if (orgs.length > 0) {
+        // Pick the saved org or the first one
         const savedOrgId = localStorage.getItem('currentOrgId');
-        const savedOrg = orgs.find(o => o.id === savedOrgId);
+        const savedOrg = orgs.find((o) => o.id === savedOrgId);
+        const targetOrg = savedOrg || orgs[0];
 
-        if (savedOrg) {
-          console.log('[OrganisationContext] Setting saved org:', savedOrg.name);
-          setCurrentOrgInternal(savedOrg, memberships);
-        } else {
-          console.log('[OrganisationContext] Setting first org:', orgs[0].name);
-          localStorage.removeItem('currentOrgId');
-          setCurrentOrgInternal(orgs[0], memberships);
-        }
-      } else {
-        console.log('[OrganisationContext] No orgs found, triggering bootstrap');
-        await bootstrapOrganisation();
+        console.log('[OrgContext] Setting current org:', targetOrg.name);
+        setCurrentOrgState(targetOrg);
+        localStorage.setItem('currentOrgId', targetOrg.id);
+
+        const rpcMember = rpcOrgs?.find((o: any) => o.org_id === targetOrg.id);
+        setCurrentOrgRole(rpcMember?.my_role || 'viewer');
       }
-    } catch (error) {
-      console.error('[OrganisationContext] Error loading organisations:', error);
+      // If orgs.length === 0, we do NOTHING here.
+      // RequireOrg will show WorkspaceRecovery.
+      // The user must explicitly click "Setup Workspace Automatically".
+      // NO auto-bootstrap. NO loop.
+
+    } catch (error: any) {
+      console.error('[OrgContext] Exception loading orgs:', error?.message || error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function bootstrapOrganisation() {
-    try {
-      console.log('[OrganisationContext] Starting workspace provisioning...');
-      setProvisioning(true);
-      setProvisioningError(null);
+  // Called ONLY when the user clicks "Setup Workspace Automatically"
+  async function retryProvisioning() {
+    console.log('[OrgContext] User clicked Setup Workspace — starting provisioning');
+    setProvisioningError(null);
+    setProvisioning(true);
 
-      const { data: projectId, error } = await supabase
-        .rpc('provision_first_workspace');
+    try {
+      // Step 1: Call provision_first_workspace RPC (SECURITY DEFINER)
+      // This creates user profile (if missing), org, org_members, and first project
+      console.log('[OrgContext] Calling provision_first_workspace...');
+      const { data: projectId, error } = await supabase.rpc('provision_first_workspace');
 
       if (error) {
-        const errorMessage = error.message || 'Failed to create workspace';
-        setProvisioningError(errorMessage);
-        console.error('[OrganisationContext] Provisioning RPC error:', error);
-        setLoading(false);
+        console.error('[OrgContext] provision_first_workspace failed:', error.message, error.code, error.details);
+        setProvisioningError(error.message || 'Failed to create workspace. Please try again.');
+        setProvisioning(false);
         return;
       }
 
-      console.log('[OrganisationContext] Provisioning succeeded, project ID:', projectId);
-      if (projectId) {
-        setFirstProjectId(projectId);
+      console.log('[OrgContext] Provisioning succeeded! Project ID:', projectId);
+      setFirstProjectId(projectId);
+
+      // Step 2: Refresh the auth profile (now has org_id set)
+      console.log('[OrgContext] Refreshing auth profile...');
+      await refreshProfile();
+
+      // Step 3: Load organisations directly via RPC (no page reload!)
+      console.log('[OrgContext] Loading organisations after provisioning...');
+      const { data: rpcOrgs, error: rpcError } = await supabase.rpc('list_my_organisations');
+
+      if (rpcError) {
+        console.error('[OrgContext] list_my_organisations failed after provisioning:', rpcError.message);
+        // Still succeeded at provisioning — try a page reload as last resort
+        console.log('[OrgContext] Falling back to page reload...');
+        window.location.reload();
+        return;
       }
 
-      console.log('[OrganisationContext] Loading organisations after provisioning...');
-      await loadOrganisations();
+      const orgs: Organisation[] = (rpcOrgs || []).map((o: any) => ({
+        id: o.org_id,
+        name: o.org_name,
+        created_at: o.member_since,
+      }));
+
+      console.log('[OrgContext] After provisioning, found', orgs.length, 'organisations');
+
+      if (orgs.length > 0) {
+        setOrganisations(orgs);
+        const targetOrg = orgs[0];
+        setCurrentOrgState(targetOrg);
+        localStorage.setItem('currentOrgId', targetOrg.id);
+
+        const rpcMember = rpcOrgs?.find((o: any) => o.org_id === targetOrg.id);
+        setCurrentOrgRole(rpcMember?.my_role || 'viewer');
+
+        console.log('[OrgContext] Setup complete! Org:', targetOrg.name);
+      } else {
+        // This shouldn't happen — we just created an org
+        console.error('[OrgContext] Provisioning succeeded but no orgs returned!');
+        setProvisioningError('Workspace was created but could not be loaded. Please refresh the page.');
+      }
+
     } catch (error: any) {
-      const errorMessage = error?.message || 'An unexpected error occurred while creating your workspace';
-      setProvisioningError(errorMessage);
-      console.error('[OrganisationContext] Provisioning exception:', error);
-      setLoading(false);
+      console.error('[OrgContext] Provisioning exception:', error?.message || error);
+      setProvisioningError(error?.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setProvisioning(false);
-      console.log('[OrganisationContext] Provisioning finished');
     }
-  }
-
-  async function retryProvisioning() {
-    console.log('[OrganisationContext] Retry provisioning requested');
-    setProvisioningError(null);
-    setLoading(true);
-    await bootstrapOrganisation();
   }
 
   function clearFirstProject() {
     setFirstProjectId(null);
   }
 
-  function setCurrentOrgInternal(org: Organisation, memberships: any[]) {
-    setCurrentOrgState(org);
-    localStorage.setItem('currentOrgId', org.id);
-
-    const membership = memberships?.find((m: any) => m.org_id === org.id);
-    setCurrentOrgRole(membership?.role || 'viewer');
-  }
-
   function setCurrentOrg(orgId: string) {
-    console.log('[Org] setCurrentOrg called with orgId:', orgId);
+    console.log('[OrgContext] setCurrentOrg:', orgId);
     const org = organisations.find(o => o.id === orgId);
     if (org) {
-      console.log('[Org] Setting current org:', org.name, 'id:', org.id);
       setCurrentOrgState(org);
       localStorage.setItem('currentOrgId', orgId);
 
-      supabase
-        .from('organisation_members')
-        .select('role')
-        .eq('org_id', orgId)
-        .eq('user_id', profile!.id)
-        .maybeSingle()
+      // Get role from cached orgs list via RPC
+      supabase.rpc('list_my_organisations')
         .then(({ data }) => {
-          const role = data?.role || 'viewer';
-          console.log('[Org] User role in org:', role);
-          setCurrentOrgRole(role);
+          const match = data?.find((o: any) => o.org_id === orgId);
+          setCurrentOrgRole(match?.my_role || 'viewer');
         });
     } else {
-      console.warn('[Org] Organisation not found in list yet, fetching from database...');
+      // Org not in list yet — refresh from RPC
       localStorage.setItem('currentOrgId', orgId);
-
-      supabase
-        .from('organisations')
-        .select('id, name, created_at')
-        .eq('id', orgId)
-        .maybeSingle()
+      supabase.rpc('list_my_organisations')
         .then(({ data, error }) => {
-          if (error) {
-            console.error('[Org] Error fetching org:', error);
-            return;
+          if (error) return;
+          const match = data?.find((o: any) => o.org_id === orgId);
+          if (match) {
+            setCurrentOrgState({
+              id: match.org_id,
+              name: match.org_name,
+              created_at: match.member_since,
+            });
+            setCurrentOrgRole(match.my_role || 'viewer');
           }
-          if (data) {
-            console.log('[Org] Fetched org from database:', data.name);
-            setCurrentOrgState(data as Organisation);
-
-            return supabase
-              .from('organisation_members')
-              .select('role')
-              .eq('org_id', orgId)
-              .eq('user_id', profile!.id)
-              .maybeSingle();
-          }
-        })
-        .then((result) => {
-          if (result && result.data) {
-            const role = result.data.role || 'viewer';
-            console.log('[Org] User role in org:', role);
-            setCurrentOrgRole(role);
-          }
-        })
-        .catch((error) => {
-          console.error('[Org] Error in setCurrentOrg fallback:', error);
         });
     }
   }
 
   async function refreshOrganisations() {
-    console.log('[Org] refreshOrganisations called');
     await loadOrganisations();
-    console.log('[Org] refreshOrganisations complete, org count:', organisations.length);
   }
 
   async function updateOrganisationName(orgId: string, newName: string) {
-    if (!profile) throw new Error('Not authenticated');
+    console.log('[OrgContext] updateOrganisationName called:', { orgId, newName, hasProfile: !!profile });
 
-    const oldName = organisations.find(o => o.id === orgId)?.name;
+    // Try RPC first (SECURITY DEFINER — bypasses RLS, no auth.uid() needed)
+    const { error: rpcError } = await supabase.rpc('update_organisation_name', {
+      p_org_id: orgId,
+      p_name: newName
+    });
 
-    const { error } = await supabase
-      .from('organisations')
-      .update({ name: newName })
-      .eq('id', orgId);
+    console.log('[OrgContext] RPC result:', rpcError ? rpcError.message : 'success');
 
-    if (error) throw error;
+    if (rpcError) {
+      // If RPC doesn't exist yet, tell user to run SQL
+      if (rpcError.message?.includes('does not exist') || rpcError.code === '42883') {
+        throw new Error('Please run the SQL fix: go to ' + window.location.origin + '/fix_all.sql, copy the contents, and run in Supabase SQL Editor');
+      }
 
-    await supabase
-      .from('audit_events')
-      .insert({
+      // Fallback to direct update (may work if RLS policies allow it)
+      console.warn('[OrgContext] RPC failed, trying direct update:', rpcError.message);
+      const { error: directError } = await supabase
+        .from('organisations')
+        .update({ name: newName })
+        .eq('id', orgId);
+
+      if (directError) {
+        console.error('[OrgContext] Direct update also failed:', directError.message);
+        throw new Error(rpcError.message);
+      }
+    }
+
+    // Best-effort audit trail
+    try {
+      await supabase.from('audit_events').insert({
         org_id: orgId,
         project_id: null,
-        user_id: profile.id,
+        user_id: profile?.id || null,
         entity_type: 'organisation',
         entity_id: orgId,
         action: 'updated',
-        metadata: {
-          field: 'name',
-          old_value: oldName,
-          new_value: newName
-        }
+        diff_json: { old_value: organisations.find(o => o.id === orgId)?.name, new_value: newName },
+        timestamp: new Date().toISOString()
       });
+    } catch {
+      // Non-critical
+    }
 
     await refreshOrganisations();
   }

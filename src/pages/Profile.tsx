@@ -52,7 +52,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (profile) {
-      setName(profile.name || '');
+      setName(profile.full_name || '');
       setJobTitle(profile.job_title || '');
       loadOrgList();
     }

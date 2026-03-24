@@ -1,13 +1,23 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useProject } from '../contexts/ProjectContext';
-import { Plus, Edit, Trash2, Target, FileText, Search, Filter, X } from 'lucide-react';
+import { useOrganisation } from '../contexts/OrganisationContext';
+import { Plus, Edit, Trash2, Target, FileText, Search, Filter, X, CheckSquare, Square, ChevronDown, Wand2 } from 'lucide-react';
 import PipelineBoard from '../components/exploitation/PipelineBoard';
 import WorkQueue from '../components/exploitation/WorkQueue';
 import OpportunityDrawer from '../components/exploitation/OpportunityDrawer';
+import UptakeDashboard from '../components/exploitation/UptakeDashboard';
+import ExploitationExport from '../components/exploitation/ExploitationExport';
+import ExploitationWizard from '../components/exploitation/ExploitationWizard';
+import { ExploitationMetadataStore, EXPLOITATION_TYPES } from '../lib/exploitationMetadata';
+import type { ExploitationType } from '../lib/exploitationMetadata';
+import { PageHeader, PageSkeleton, ConfirmDialog } from '../components/ui';
+import useConfirm from '../hooks/useConfirm';
 
 export default function Uptake() {
   const { currentProject } = useProject();
+  const { currentOrganisation } = useOrganisation();
+  const [confirmProps, confirm] = useConfirm();
   const [activeTab, setActiveTab] = useState<'board' | 'queue' | 'opportunities' | 'agreements' | 'assets'>('board');
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [agreements, setAgreements] = useState<any[]>([]);
@@ -25,7 +35,10 @@ export default function Uptake() {
     stage: 'identified',
     next_action: '',
     notes: '',
-    asset_id: ''
+    asset_id: '',
+    exploitation_type: '' as ExploitationType,
+    priority: 'medium' as 'low' | 'medium' | 'high',
+    next_action_due: ''
   });
   const [agreementData, setAgreementData] = useState({
     opportunity_id: '',
@@ -36,6 +49,14 @@ export default function Uptake() {
     notes: '',
     file_url: ''
   });
+
+  // Bulk actions state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkStageTarget, setBulkStageTarget] = useState('');
+  const [showBulkStageDropdown, setShowBulkStageDropdown] = useState(false);
+
+  // Wizard state
+  const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
     if (currentProject) {
@@ -98,15 +119,21 @@ export default function Uptake() {
     try {
       console.log('[Exploitation] Saving opportunity');
 
+      // Only send real DB columns — exploitation_type, priority, next_action_due are metadata (localStorage)
+      const dbPayload = {
+        organisation_name: opportunityData.organisation_name,
+        contact_person: opportunityData.contact_person || null,
+        stage: opportunityData.stage,
+        next_action: opportunityData.next_action || null,
+        notes: opportunityData.notes || null,
+        asset_id: opportunityData.asset_id || null,
+      };
+
       if (editingId) {
         const { error } = await supabase
           .from('uptake_opportunities')
           .update({
-            ...opportunityData,
-            asset_id: opportunityData.asset_id || null,
-            contact_person: opportunityData.contact_person || null,
-            next_action: opportunityData.next_action || null,
-            notes: opportunityData.notes || null,
+            ...dbPayload,
             updated_at: new Date().toISOString()
           })
           .eq('id', editingId);
@@ -116,15 +143,27 @@ export default function Uptake() {
         const { error } = await supabase
           .from('uptake_opportunities')
           .insert({
-            ...opportunityData,
+            ...dbPayload,
             project_id: currentProject!.id,
-            asset_id: opportunityData.asset_id || null,
-            contact_person: opportunityData.contact_person || null,
-            next_action: opportunityData.next_action || null,
-            notes: opportunityData.notes || null
           });
 
         if (error) throw error;
+      }
+
+      // Save metadata (exploitation type, priority, due date) to local store
+      if (currentOrganisation && currentProject) {
+        // For new items we need the inserted ID — reload first, then save metadata
+        // For edits, we already have editingId
+        if (editingId) {
+          ExploitationMetadataStore.setMetadata(
+            currentOrganisation.id, currentProject.id, editingId,
+            {
+              exploitationType: opportunityData.exploitation_type || undefined,
+              priority: opportunityData.priority || 'medium',
+              nextActionDue: opportunityData.next_action_due || undefined
+            }
+          );
+        }
       }
 
       setOpportunityData({
@@ -133,7 +172,10 @@ export default function Uptake() {
         stage: 'identified',
         next_action: '',
         notes: '',
-        asset_id: ''
+        asset_id: '',
+        exploitation_type: '' as ExploitationType,
+        priority: 'medium',
+        next_action_due: ''
       });
       setEditingId(null);
       setShowOpportunityForm(false);
@@ -180,7 +222,8 @@ export default function Uptake() {
   }
 
   async function handleDelete(id: string, type: 'opportunity' | 'agreement') {
-    if (confirm(`Delete this ${type}?`)) {
+    const ok = await confirm({ title: `Delete ${type}?`, message: `This ${type} will be permanently removed. This cannot be undone.` });
+    if (ok) {
       try {
         const { error } = await supabase
           .from(type === 'opportunity' ? 'uptake_opportunities' : 'agreement_records')
@@ -215,16 +258,94 @@ export default function Uptake() {
   }
 
   function handleEditOpportunity(opp: any) {
+    // Load metadata from local store
+    let meta: any = {};
+    if (currentOrganisation && currentProject) {
+      meta = ExploitationMetadataStore.getMetadata(
+        currentOrganisation.id, currentProject.id, opp.id
+      ) || {};
+    }
+
     setOpportunityData({
       organisation_name: opp.organisation_name,
       contact_person: opp.contact_person || '',
       stage: opp.stage,
       next_action: opp.next_action || '',
       notes: opp.notes || '',
-      asset_id: opp.asset_id || ''
+      asset_id: opp.asset_id || '',
+      exploitation_type: (meta.exploitationType || '') as ExploitationType,
+      priority: meta.priority || 'medium',
+      next_action_due: meta.nextActionDue || ''
     });
     setEditingId(opp.id);
     setShowOpportunityForm(true);
+  }
+
+  // --- Bulk actions ---
+  function toggleSelectAll() {
+    if (selectedIds.size === filteredOpportunities.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredOpportunities.map(o => o.id)));
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkStageChange(newStage: string) {
+    if (selectedIds.size === 0 || !newStage) return;
+    const ok1 = await confirm({ title: 'Move opportunities?', message: `Move ${selectedIds.size} opportunities to "${newStage}"?`, variant: 'info', confirmLabel: 'Move' });
+    if (!ok1) return;
+
+    try {
+      const ids = Array.from(selectedIds);
+      const { error } = await supabase
+        .from('uptake_opportunities')
+        .update({ stage: newStage, updated_at: new Date().toISOString() })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setSelectedIds(new Set());
+      setBulkStageTarget('');
+      setShowBulkStageDropdown(false);
+      loadOpportunities();
+    } catch (error: any) {
+      console.error('[Exploitation] Bulk stage change error:', error);
+      alert('Failed to update opportunities');
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    const ok2 = await confirm({ title: 'Delete opportunities?', message: `Delete ${selectedIds.size} opportunities? This cannot be undone.` });
+    if (!ok2) return;
+
+    try {
+      const ids = Array.from(selectedIds);
+      const { error } = await supabase
+        .from('uptake_opportunities')
+        .delete()
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setSelectedIds(new Set());
+      loadOpportunities();
+    } catch (error: any) {
+      console.error('[Exploitation] Bulk delete error:', error);
+      alert('Failed to delete opportunities');
+    }
   }
 
   function handleCreateAgreementForOpportunity(opportunityId: string) {
@@ -260,6 +381,13 @@ export default function Uptake() {
     return !opportunities.some(opp => opp.asset_id === asset.id);
   });
 
+  function getOppMeta(oppId: string) {
+    if (!currentOrganisation || !currentProject) return null;
+    return ExploitationMetadataStore.getMetadata(
+      currentOrganisation.id, currentProject.id, oppId
+    );
+  }
+
   if (!currentProject) {
     return (
       <div className="text-center py-12">
@@ -270,28 +398,48 @@ export default function Uptake() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Exploitation & Uptake Pipeline</h1>
-          <p className="text-slate-600 mt-1">Track opportunities from identification to implementation</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowOpportunityForm(true)}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            New Opportunity
-          </button>
-          <button
-            onClick={() => setShowAgreementForm(true)}
-            className="flex items-center gap-2 border border-slate-300 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors"
-          >
-            <FileText className="h-4 w-4" />
-            New Agreement
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        icon={Target}
+        title="Exploitation & Uptake Pipeline"
+        subtitle="Track opportunities from identification to implementation"
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowOpportunityForm(true)}
+              className="flex items-center gap-2 bg-[#1BAE70] text-white px-4 py-2.5 rounded-lg hover:bg-[#06752E] font-medium transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              New Opportunity
+            </button>
+            <button
+              onClick={() => setShowAgreementForm(true)}
+              className="flex items-center gap-2 border border-slate-300 text-[#14261C] px-4 py-2.5 rounded-lg hover:bg-slate-50 font-medium transition-colors"
+            >
+              <FileText className="h-4 w-4" />
+              Agreement
+            </button>
+            <ExploitationExport
+              opportunities={opportunities}
+              agreements={agreements}
+            />
+            <button
+              onClick={() => setShowWizard(true)}
+              className="flex items-center gap-2 border border-slate-300 text-[#14261C] px-4 py-2.5 rounded-lg hover:bg-slate-50 font-medium transition-colors"
+              title="Exploitation Strategy Wizard"
+            >
+              <Wand2 className="h-4 w-4" />
+              Wizard
+            </button>
+          </div>
+        }
+      />
+
+      {/* Dashboard Summary */}
+      <UptakeDashboard
+        opportunities={opportunities}
+        agreements={agreements}
+        projectId={currentProject.id}
+      />
 
       <div className="flex gap-2 border-b border-slate-200">
         {(['board', 'queue', 'opportunities', 'agreements'] as const).map((tab) => (
@@ -386,8 +534,69 @@ export default function Uptake() {
       {activeTab === 'opportunities' && (
         <div className="bg-white rounded-lg shadow border border-slate-200">
           <div className="p-6 border-b border-slate-200">
-            <h2 className="text-lg font-semibold text-slate-900">Opportunities List</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Opportunities List</h2>
+              {filteredOpportunities.length > 0 && (
+                <button
+                  onClick={toggleSelectAll}
+                  className="text-sm text-slate-600 hover:text-slate-900 flex items-center gap-1.5"
+                >
+                  {selectedIds.size === filteredOpportunities.length ? (
+                    <CheckSquare className="h-4 w-4 text-blue-600" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                  {selectedIds.size === filteredOpportunities.length ? 'Deselect all' : 'Select all'}
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Bulk action bar */}
+          {selectedIds.size > 0 && (
+            <div className="bg-blue-50 border-b border-blue-200 px-6 py-3 flex items-center justify-between">
+              <span className="text-sm font-medium text-blue-900">
+                {selectedIds.size} selected
+              </span>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowBulkStageDropdown(!showBulkStageDropdown)}
+                    className="text-sm px-3 py-1.5 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 flex items-center gap-1"
+                  >
+                    Change Stage
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                  {showBulkStageDropdown && (
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-20 min-w-[160px]">
+                      {stages.map(s => (
+                        <button
+                          key={s}
+                          onClick={() => handleBulkStageChange(s)}
+                          className="block w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          {s.charAt(0).toUpperCase() + s.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={handleBulkDelete}
+                  className="text-sm px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  Delete Selected
+                </button>
+                <button
+                  onClick={() => { setSelectedIds(new Set()); setShowBulkStageDropdown(false); }}
+                  className="text-sm text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {filteredOpportunities.length === 0 ? (
             <div className="p-6 text-center text-slate-600">
               <Target className="h-12 w-12 text-slate-400 mx-auto mb-3" />
@@ -395,21 +604,56 @@ export default function Uptake() {
             </div>
           ) : (
             <div className="divide-y divide-slate-200">
-              {filteredOpportunities.map(opp => (
+              {filteredOpportunities.map(opp => {
+                const meta = getOppMeta(opp.id);
+                const typeInfo = meta?.exploitationType
+                  ? EXPLOITATION_TYPES.find(t => t.value === meta.exploitationType)
+                  : null;
+                const priorityColors: Record<string, string> = {
+                  high: 'bg-red-100 text-red-700',
+                  medium: 'bg-blue-100 text-blue-700',
+                  low: 'bg-slate-100 text-slate-600'
+                };
+                const isSelected = selectedIds.has(opp.id);
+
+                return (
                 <div
                   key={opp.id}
-                  className="p-6 hover:bg-slate-50 cursor-pointer"
+                  className={`p-6 hover:bg-slate-50 cursor-pointer ${isSelected ? 'bg-blue-50/50' : ''}`}
                   onClick={() => setSelectedOpportunityId(opp.id)}
                 >
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex items-start gap-3 flex-1">
-                      <Target className="h-5 w-5 text-slate-400 mt-1" />
+                      {/* Checkbox */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelect(opp.id);
+                        }}
+                        className="mt-1 flex-shrink-0"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="h-5 w-5 text-blue-600" />
+                        ) : (
+                          <Square className="h-5 w-5 text-slate-400 hover:text-slate-600" />
+                        )}
+                      </button>
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <span className="font-semibold text-slate-900">{opp.organisation_name}</span>
                           <span className={`text-xs px-2 py-0.5 rounded ${stageColors[opp.stage]}`}>
                             {opp.stage}
                           </span>
+                          {typeInfo && (
+                            <span className={`text-xs px-2 py-0.5 rounded ${typeInfo.color}`}>
+                              {typeInfo.label}
+                            </span>
+                          )}
+                          {meta?.priority && meta.priority !== 'medium' && (
+                            <span className={`text-xs px-2 py-0.5 rounded ${priorityColors[meta.priority]}`}>
+                              {meta.priority === 'high' ? '\u2b06 High' : '\u2b07 Low'}
+                            </span>
+                          )}
                           {!opp.owner_user_id && (
                             <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">
                               Unassigned
@@ -421,6 +665,11 @@ export default function Uptake() {
                         )}
                         {opp.next_action && (
                           <p className="text-sm text-slate-700 mt-1">{opp.next_action}</p>
+                        )}
+                        {meta?.nextActionDue && (
+                          <p className="text-xs text-slate-500 mt-1">
+                            Due: {new Date(meta.nextActionDue).toLocaleDateString()}
+                          </p>
                         )}
                       </div>
                     </div>
@@ -446,7 +695,8 @@ export default function Uptake() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -614,6 +864,35 @@ export default function Uptake() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Exploitation Type</label>
+                  <select
+                    value={opportunityData.exploitation_type}
+                    onChange={(e) => setOpportunityData({ ...opportunityData, exploitation_type: e.target.value as ExploitationType })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  >
+                    <option value="">Not specified</option>
+                    {EXPLOITATION_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Priority</label>
+                  <select
+                    value={opportunityData.priority}
+                    onChange={(e) => setOpportunityData({ ...opportunityData, priority: e.target.value as 'low' | 'medium' | 'high' })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Next Action</label>
                 <textarea
@@ -621,6 +900,16 @@ export default function Uptake() {
                   onChange={(e) => setOpportunityData({ ...opportunityData, next_action: e.target.value })}
                   rows={2}
                   placeholder="What needs to happen next?"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Next Action Due Date</label>
+                <input
+                  type="date"
+                  value={opportunityData.next_action_due}
+                  onChange={(e) => setOpportunityData({ ...opportunityData, next_action_due: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                 />
               </div>
@@ -784,6 +1073,19 @@ export default function Uptake() {
         onClose={() => setSelectedOpportunityId(null)}
         onUpdated={loadData}
       />
+
+      {showWizard && (
+        <ExploitationWizard
+          assets={assets}
+          opportunities={opportunities}
+          onClose={() => setShowWizard(false)}
+          onComplete={() => {
+            setShowWizard(false);
+            loadData();
+          }}
+        />
+      )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

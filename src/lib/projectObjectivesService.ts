@@ -2,22 +2,21 @@ import { supabase } from './supabase';
 import { objectiveLibraryService } from './objectiveLibraryService';
 
 export interface ProjectObjective {
-  objective_id: string;
+  id: string;
   project_id: string;
-  objective_lib_id: string | null;
+  objective_lib_id?: string | null;
+  objective_id?: string | null;
   title: string;
   description: string;
-  domain: 'communication' | 'dissemination' | 'exploitation';
-  outcome_type: 'visibility' | 'knowledge' | 'capability' | 'engagement' | 'adoption' | 'policy_influence' | 'sustainability';
-  priority: 'high' | 'medium' | 'low';
-  stakeholder_types: string[];
-  time_horizon: 'short' | 'medium' | 'long';
-  notes: string | null;
-  source: 'manual' | 'library' | 'strategy';
-  kpis_linked_count: number;
-  activities_linked_count: number;
-  status: 'on_track' | 'at_risk' | 'needs_kpis' | 'needs_activities' | 'no_data';
-  created_by: string | null;
+  domain?: 'communication' | 'dissemination' | 'exploitation';
+  priority: string;
+  status?: string;
+  notes?: string | null;
+  means_of_verification?: string[];
+  source?: 'manual' | 'library' | 'strategy';
+  owner?: string | null;
+  target_date?: string | null;
+  responsible_person?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -61,7 +60,7 @@ export class ProjectObjectivesService {
     const { data, error } = await supabase
       .from('project_objectives')
       .select('*')
-      .eq('objective_id', objectiveId)
+      .eq('id', objectiveId)
       .maybeSingle();
 
     if (error) throw error;
@@ -73,28 +72,36 @@ export class ProjectObjectivesService {
     objectiveLibId: string,
     customization: ObjectiveCustomization
   ): Promise<string> {
-    // Use secure RPC to create objective with proper permissions and profile handling
-    const { data: objectiveId, error } = await supabase
-      .rpc('create_project_objective_from_library', {
-        p_project_id: projectId,
-        p_objective_lib_id: objectiveLibId,
-        p_priority: customization.priority,
-        p_stakeholder_types: customization.stakeholder_types,
-        p_time_horizon: customization.time_horizon,
-        p_notes: customization.notes || null,
-        p_source: 'library'
-      });
+    // Fetch the library objective to copy title/description
+    const libObjective = await objectiveLibraryService.getObjectiveById(objectiveLibId);
+    if (!libObjective) {
+      throw new Error('Library objective not found');
+    }
+
+    // Direct insert into project_objectives
+    const { data, error } = await supabase
+      .from('project_objectives')
+      .insert({
+        project_id: projectId,
+        objective_lib_id: objectiveLibId,
+        title: libObjective.title,
+        description: libObjective.description,
+        priority: customization.priority,
+        status: 'active'
+      })
+      .select('id')
+      .single();
 
     if (error) {
-      console.error('[Objectives] Error creating objective via RPC:', error);
+      console.error('[Objectives] Error creating objective:', error);
       throw new Error(error.message || 'Failed to create objective');
     }
 
-    if (!objectiveId) {
+    if (!data?.id) {
       throw new Error('Failed to create objective: no ID returned');
     }
 
-    return objectiveId;
+    return data.id;
   }
 
   static async updateObjective(
@@ -107,7 +114,7 @@ export class ProjectObjectivesService {
         ...updates,
         updated_at: new Date().toISOString()
       })
-      .eq('objective_id', objectiveId);
+      .eq('id', objectiveId);
 
     if (error) throw error;
   }
@@ -116,7 +123,7 @@ export class ProjectObjectivesService {
     const { error } = await supabase
       .from('project_objectives')
       .delete()
-      .eq('objective_id', objectiveId);
+      .eq('id', objectiveId);
 
     if (error) throw error;
   }
@@ -279,37 +286,29 @@ export class ProjectObjectivesService {
     projectId: string,
     objectiveId: string
   ): Promise<void> {
-    const health = await this.computeObjectiveHealth(projectId, objectiveId);
-
-    await supabase
-      .from('project_objectives')
-      .update({
-        kpis_linked_count: health.kpis_linked,
-        activities_linked_count: health.activities_linked,
-        status: health.status,
-        updated_at: new Date().toISOString()
-      })
-      .eq('objective_id', objectiveId);
+    // Compute health but do NOT overwrite user-set status
+    // Status is managed manually by the user (draft, planned, in_progress, etc.)
+    await this.computeObjectiveHealth(projectId, objectiveId);
   }
 
   static async computeAllObjectivesHealth(projectId: string): Promise<void> {
     const objectives = await this.listObjectives(projectId);
 
     for (const objective of objectives) {
-      await this.computeAndUpdateHealth(projectId, objective.objective_id);
+      await this.computeAndUpdateHealth(projectId, objective.id);
     }
   }
 
-  static getStatusInfo(status: ProjectObjective['status']) {
-    const statusMap = {
-      on_track: { label: 'On Track', color: 'green', description: 'Objective is progressing well' },
-      at_risk: { label: 'At Risk', color: 'yellow', description: 'Needs attention' },
-      needs_kpis: { label: 'Needs KPIs', color: 'orange', description: 'No KPIs linked yet' },
-      needs_activities: { label: 'Needs Activities', color: 'orange', description: 'No activities linked yet' },
-      no_data: { label: 'No Data', color: 'gray', description: 'No measurement data recorded' }
+  static getStatusInfo(status: string | undefined) {
+    const statusMap: Record<string, { label: string; color: string; description: string }> = {
+      draft: { label: 'Draft', color: 'gray', description: 'Initial planning phase' },
+      planned: { label: 'Planned', color: 'blue', description: 'Approved and scheduled' },
+      in_progress: { label: 'In Progress', color: 'yellow', description: 'Currently being implemented' },
+      completed: { label: 'Completed', color: 'green', description: 'Fully achieved' },
+      on_hold: { label: 'On Hold', color: 'orange', description: 'Temporarily paused' },
     };
 
-    return statusMap[status] || statusMap.no_data;
+    return statusMap[status || 'draft'] || statusMap.draft;
   }
 }
 

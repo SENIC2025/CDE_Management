@@ -1,19 +1,24 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Plus, TrendingUp, BookOpen, Target, Library, AlertCircle, X, Edit2, Save, ExternalLink, Search, Filter } from 'lucide-react';
-import IndicatorSelectorModal from './IndicatorSelectorModal';
+import { Plus, TrendingUp, BookOpen, Target, Library, AlertCircle, X, Edit2, Save, Trash2, ExternalLink, Search, Filter } from 'lucide-react';
 import IndicatorLibraryPickerModal from './indicators/IndicatorLibraryPickerModal';
+import BundlePickerModal from './indicators/BundlePickerModal';
+import { IndicatorLibraryService } from '../lib/indicatorLibraryService';
+import { ConfirmDialog } from './ui';
+import useConfirm from '../hooks/useConfirm';
 
 interface ProjectIndicator {
-  project_indicator_id: string;
-  indicator_id: string;
-  baseline: number | null;
-  target: number | null;
-  current_value: number | null;
-  status: string;
-  responsible_role: string | null;
-  notes: string | null;
+  id: string;              // indicators.id
+  project_id: string;
+  title: string;
+  description: string | null;
+  measurement_unit: string | null;
+  target_value: number | null;
+  status: string | null;
+  locked: boolean;
+  // Resolved from static catalog
+  library_code: string | null;
   indicator: {
     code: string;
     name: string;
@@ -33,15 +38,14 @@ interface ProjectIndicatorsProps {
 
 export default function ProjectIndicators({ projectId, onChange }: ProjectIndicatorsProps) {
   const navigate = useNavigate();
+  const [confirmProps, confirmDialog] = useConfirm();
   const [indicators, setIndicators] = useState<ProjectIndicator[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
-  const [showSelector, setShowSelector] = useState(false);
+  const [showBundlePicker, setShowBundlePicker] = useState(false);
   const [selectedIndicator, setSelectedIndicator] = useState<ProjectIndicator | null>(null);
   const [editing, setEditing] = useState(false);
-  const [editedBaseline, setEditedBaseline] = useState('');
   const [editedTarget, setEditedTarget] = useState('');
-  const [editedRole, setEditedRole] = useState('');
   const [editedNotes, setEditedNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -59,37 +63,77 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
       console.log('[ProjectIndicators] Loading indicators for project:', projectId);
       setLoading(true);
 
+      // Query the `indicators` table directly — this is what addIndicatorsToProject writes to
       const { data, error } = await supabase
-        .from('project_indicators')
-        .select(`
-          project_indicator_id,
-          indicator_id,
-          baseline,
-          target,
-          current_value,
-          status,
-          responsible_role,
-          notes,
-          indicator:indicator_library (
-            code,
-            name,
-            domain,
-            definition,
-            rationale,
-            limitations,
-            interpretation_notes,
-            unit
-          )
-        `)
+        .from('indicators')
+        .select('id, project_id, title, description, measurement_unit, target_value, status, locked')
         .eq('project_id', projectId)
-        .eq('status', 'active')
-        .order('indicator(domain)', { ascending: true })
-        .order('indicator(code)', { ascending: true });
+        .is('deleted_at', null)
+        .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setIndicators(data || []);
+      if (!data || data.length === 0) {
+        setIndicators([]);
+        return;
+      }
+
+      // Resolve indicator details from static catalog using embedded code in description
+      const enriched: ProjectIndicator[] = data.map((row: any) => {
+        const libraryCode = IndicatorLibraryService.extractCodeFromDescription(row.description);
+        const catalogEntry = libraryCode ? IndicatorLibraryService.getIndicatorByCode(libraryCode) : null;
+
+        // Infer domain from code prefix or catalog
+        let domain = 'communication';
+        if (catalogEntry) {
+          domain = catalogEntry.domain;
+        } else if (libraryCode) {
+          if (libraryCode.startsWith('DIS-')) domain = 'dissemination';
+          else if (libraryCode.startsWith('EXP-')) domain = 'exploitation';
+        }
+
+        // Strip the [CODE] prefix from description for display
+        const cleanDefinition = row.description
+          ? row.description.replace(/^\[[A-Z]{3}-[A-Z]+-\d+\]\s*/, '')
+          : '';
+
+        return {
+          id: row.id,
+          project_id: row.project_id,
+          title: row.title,
+          description: row.description,
+          measurement_unit: row.measurement_unit,
+          target_value: row.target_value,
+          status: row.status,
+          locked: row.locked || false,
+          library_code: libraryCode,
+          indicator: catalogEntry
+            ? {
+                code: catalogEntry.code,
+                name: catalogEntry.name,
+                domain: catalogEntry.domain,
+                definition: catalogEntry.definition,
+                rationale: catalogEntry.rationale,
+                limitations: catalogEntry.limitations,
+                interpretation_notes: catalogEntry.interpretation_notes,
+                unit: catalogEntry.unit,
+              }
+            : {
+                code: libraryCode || '—',
+                name: row.title || 'Custom Indicator',
+                domain,
+                definition: cleanDefinition,
+                rationale: null,
+                limitations: null,
+                interpretation_notes: null,
+                unit: row.measurement_unit || 'number',
+              },
+        };
+      });
+
+      setIndicators(enriched);
     } catch (error) {
       console.error('[ProjectIndicators] Error loading indicators:', error);
+      setIndicators([]);
     } finally {
       setLoading(false);
     }
@@ -97,10 +141,8 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
 
   function openIndicatorPanel(indicator: ProjectIndicator) {
     setSelectedIndicator(indicator);
-    setEditedBaseline(indicator.baseline?.toString() || '');
-    setEditedTarget(indicator.target?.toString() || '');
-    setEditedRole(indicator.responsible_role || '');
-    setEditedNotes(indicator.notes || '');
+    setEditedTarget(indicator.target_value?.toString() || '');
+    setEditedNotes('');
     setEditing(false);
   }
 
@@ -110,29 +152,24 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
     try {
       setSaving(true);
 
+      // Update the `indicators` table — only columns that exist
       const { error } = await supabase
-        .from('project_indicators')
+        .from('indicators')
         .update({
-          baseline: editedBaseline ? parseFloat(editedBaseline) : null,
-          target: editedTarget ? parseFloat(editedTarget) : null,
-          responsible_role: editedRole || null,
-          notes: editedNotes || null
+          target_value: editedTarget ? parseFloat(editedTarget) : null,
         })
-        .eq('project_indicator_id', selectedIndicator.project_indicator_id);
+        .eq('id', selectedIndicator.id);
 
       if (error) throw error;
 
       await loadIndicators();
       setEditing(false);
 
-      const updated = indicators.find(i => i.project_indicator_id === selectedIndicator.project_indicator_id);
+      const updated = indicators.find(i => i.id === selectedIndicator.id);
       if (updated) {
         setSelectedIndicator({
           ...updated,
-          baseline: editedBaseline ? parseFloat(editedBaseline) : null,
-          target: editedTarget ? parseFloat(editedTarget) : null,
-          responsible_role: editedRole || null,
-          notes: editedNotes || null
+          target_value: editedTarget ? parseFloat(editedTarget) : null,
         });
       }
     } catch (error) {
@@ -143,13 +180,35 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
     }
   }
 
+  async function handleRemoveIndicator(indicatorId: string) {
+    const ok = await confirmDialog({ title: 'Remove indicator?', message: 'This indicator will be removed from the project.' });
+    if (!ok) return;
+
+    try {
+      // Soft-delete by setting deleted_at
+      const { error } = await supabase
+        .from('indicators')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', indicatorId);
+
+      if (error) throw error;
+
+      setSelectedIndicator(null);
+      await loadIndicators();
+      if (onChange) onChange();
+    } catch (error) {
+      console.error('[ProjectIndicators] Error removing indicator:', error);
+      alert('Failed to remove indicator. Please try again.');
+    }
+  }
+
   function handleViewDefinition(indicatorId: string) {
     navigate(`/library?indicatorId=${indicatorId}`);
   }
 
-  function calculateProgress(current: number | null, target: number | null): number {
-    if (!current || !target || target === 0) return 0;
-    return Math.min(Math.round((current / target) * 100), 100);
+  function calculateProgress(_current: number | null, _target: number | null): number {
+    // Progress tracking will come later with indicator_values
+    return 0;
   }
 
   function getDomainIcon(domain: string) {
@@ -242,8 +301,8 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
             Add from Library
           </button>
           <button
-            onClick={() => setShowSelector(true)}
-            className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
+            onClick={() => setShowBundlePicker(true)}
+            className="px-4 py-2 border border-emerald-300 text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-2"
           >
             <Library className="h-4 w-4" />
             Use Bundle
@@ -331,11 +390,10 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredIndicators.map((indicator) => {
             const DomainIcon = getDomainIcon(indicator.indicator.domain);
-            const progress = calculateProgress(indicator.current_value, indicator.target);
 
             return (
               <div
-                key={indicator.project_indicator_id}
+                key={indicator.id}
                 className="bg-white rounded-lg border border-slate-200 p-5 hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between mb-3">
@@ -346,7 +404,9 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
                         {formatLabel(indicator.indicator.domain)}
                       </div>
                     </span>
-                    <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded">Library</span>
+                    {indicator.library_code && (
+                      <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded">Library</span>
+                    )}
                   </div>
                 </div>
 
@@ -356,53 +416,42 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
                 </div>
 
                 <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-xs text-slate-600 mb-1">
-                      <span>Progress</span>
-                      <span className="font-medium">{progress}%</span>
-                    </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 rounded-full transition-all"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                  </div>
-
                   <div className="flex justify-between text-xs">
-                    <div>
-                      <div className="text-slate-500">Current</div>
-                      <div className="font-medium text-slate-900">
-                        {indicator.current_value ?? '-'}
-                      </div>
-                    </div>
                     <div>
                       <div className="text-slate-500">Target</div>
                       <div className="font-medium text-slate-900">
-                        {indicator.target ?? '-'}
+                        {indicator.target_value ?? '-'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-slate-500">Baseline</div>
+                      <div className="text-slate-500">Unit</div>
                       <div className="font-medium text-slate-900">
-                        {indicator.baseline ?? '-'}
+                        {indicator.measurement_unit ? formatLabel(indicator.measurement_unit) : '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Status</div>
+                      <div className="font-medium text-slate-900">
+                        {indicator.status ? formatLabel(indicator.status) : '-'}
                       </div>
                     </div>
                   </div>
 
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                    <button
-                      onClick={() => handleViewDefinition(indicator.indicator_id)}
-                      className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      View definition
-                    </button>
+                    {indicator.library_code && (
+                      <button
+                        onClick={() => handleViewDefinition(indicator.id)}
+                        className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        View definition
+                      </button>
+                    )}
                     <button
                       onClick={() => openIndicatorPanel(indicator)}
                       className="text-xs px-2 py-1 bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
                     >
-                      Edit values
+                      Details
                     </button>
                   </div>
                 </div>
@@ -426,17 +475,17 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
         allowMultiSelect={true}
       />
 
-      {showSelector && (
-        <IndicatorSelectorModal
-          projectId={projectId}
-          onClose={() => setShowSelector(false)}
-          onSelect={() => {
-            setShowSelector(false);
-            loadIndicators();
-            if (onChange) onChange();
-          }}
-        />
-      )}
+      <BundlePickerModal
+        open={showBundlePicker}
+        onClose={() => setShowBundlePicker(false)}
+        projectId={projectId}
+        onApplied={(result) => {
+          const message = `Bundle "${result.bundleName}": added ${result.inserted} indicator${result.inserted !== 1 ? 's' : ''}${result.skipped > 0 ? `, ${result.skipped} already in project` : ''}`;
+          alert(message);
+          loadIndicators();
+          if (onChange) onChange();
+        }}
+      />
 
       {selectedIndicator && (
         <div className="fixed inset-y-0 right-0 w-full md:w-[500px] bg-white shadow-2xl border-l border-slate-200 z-50 flex flex-col">
@@ -453,6 +502,7 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
                     setEditing(true);
                   }}
                   className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                  title="Edit target"
                 >
                   <Edit2 className="h-4 w-4" />
                 </button>
@@ -465,6 +515,13 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
                   <Save className="h-4 w-4" />
                 </button>
               )}
+              <button
+                onClick={() => handleRemoveIndicator(selectedIndicator.id)}
+                className="p-2 hover:bg-red-50 text-red-500 rounded-lg transition-colors"
+                title="Remove from project"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
               <button
                 onClick={() => {
                   setSelectedIndicator(null);
@@ -508,35 +565,8 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
               </div>
             )}
 
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleViewDefinition(selectedIndicator.indicator_id)}
-                className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                <ExternalLink className="h-4 w-4" />
-                View Full Definition
-              </button>
-            </div>
-
             <div className="border-t border-slate-200 pt-6 space-y-4">
               <h3 className="text-sm font-semibold text-slate-900">Project Values</h3>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Baseline</label>
-                {editing ? (
-                  <input
-                    type="number"
-                    step="any"
-                    value={editedBaseline}
-                    onChange={(e) => setEditedBaseline(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                ) : (
-                  <div className="text-2xl font-bold text-slate-900">
-                    {selectedIndicator.baseline ?? '-'} {selectedIndicator.indicator.unit && formatLabel(selectedIndicator.indicator.unit)}
-                  </div>
-                )}
-              </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Target</label>
@@ -550,49 +580,29 @@ export default function ProjectIndicators({ projectId, onChange }: ProjectIndica
                   />
                 ) : (
                   <div className="text-2xl font-bold text-slate-900">
-                    {selectedIndicator.target ?? '-'} {selectedIndicator.indicator.unit && formatLabel(selectedIndicator.indicator.unit)}
-                  </div>
-                )}
-                {!editing && !selectedIndicator.baseline && selectedIndicator.target && (
-                  <p className="text-xs text-amber-600 mt-1">Baseline recommended for meaningful tracking</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Responsible Role</label>
-                {editing ? (
-                  <input
-                    type="text"
-                    value={editedRole}
-                    onChange={(e) => setEditedRole(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                ) : (
-                  <div className="text-sm text-slate-900">
-                    {selectedIndicator.responsible_role || 'Not assigned'}
+                    {selectedIndicator.target_value ?? '-'} {selectedIndicator.indicator.unit && formatLabel(selectedIndicator.indicator.unit)}
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Notes</label>
-                {editing ? (
-                  <textarea
-                    value={editedNotes}
-                    onChange={(e) => setEditedNotes(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                ) : (
-                  <div className="text-sm text-slate-700">
-                    {selectedIndicator.notes || 'No notes'}
-                  </div>
-                )}
+                <label className="block text-sm font-medium text-slate-700 mb-2">Measurement Unit</label>
+                <div className="text-sm text-slate-900">
+                  {selectedIndicator.measurement_unit ? formatLabel(selectedIndicator.measurement_unit) : 'Not specified'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Status</label>
+                <div className="text-sm text-slate-900">
+                  {selectedIndicator.status ? formatLabel(selectedIndicator.status) : 'Active'}
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

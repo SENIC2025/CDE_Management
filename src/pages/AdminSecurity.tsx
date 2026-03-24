@@ -1,20 +1,27 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useOrganisation } from '../contexts/OrganisationContext';
 import { useEntitlements } from '../contexts/EntitlementsContext';
 import { logAuditEvent } from '../lib/audit';
+import { ConfirmDialog } from '../components/ui';
+import useConfirm from '../hooks/useConfirm';
 import {
   Shield,
   Users,
   FileText,
   Database,
   Download,
-  Calendar,
   User,
   Crown,
   Clock,
-  Search,
   AlertCircle,
+  Copy,
+  Check,
+  Key,
+  UserPlus,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 
 interface OrgMember {
@@ -46,7 +53,14 @@ interface AuditEvent {
 
 export default function AdminSecurity() {
   const { profile } = useAuth();
-  const { isOrgAdmin } = useEntitlements();
+  const { currentOrg, currentOrgRole } = useOrganisation();
+  const { isOrgAdmin, entitlements } = useEntitlements();
+  // Check admin via BOTH contexts — EntitlementsContext uses is_org_admin RPC,
+  // OrganisationContext uses list_my_organisations RPC. Either one succeeding is enough.
+  const isAdmin = isOrgAdmin || currentOrgRole === 'admin';
+  // Use org ID from OrganisationContext (loaded via RPC) — profile.org_id may be null due to RLS
+  const orgId = currentOrg?.id || profile?.org_id;
+  const [confirmProps, confirmDialog] = useConfirm();
   const [activeTab, setActiveTab] = useState<'access' | 'audit' | 'data'>('access');
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<OrgMember[]>([]);
@@ -64,16 +78,23 @@ export default function AdminSecurity() {
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
+  // Invite state
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [generatingCode, setGeneratingCode] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+
   useEffect(() => {
-    if (profile?.org_id && isOrgAdmin) {
+    if (orgId && isAdmin) {
       loadData();
     } else {
       setLoading(false);
     }
-  }, [profile?.org_id, isOrgAdmin]);
+  }, [orgId, isAdmin]);
 
   useEffect(() => {
-    if (activeTab === 'audit' && isOrgAdmin) {
+    if (activeTab === 'audit' && isAdmin) {
       loadAuditEvents();
     }
   }, [activeTab, auditFilters, page]);
@@ -81,7 +102,7 @@ export default function AdminSecurity() {
   async function loadData() {
     setLoading(true);
     try {
-      await Promise.all([loadMembers(), loadDataCounts()]);
+      await Promise.all([loadMembers(), loadDataCounts(), loadJoinCode()]);
     } catch (error) {
       console.error('Error loading security data:', error);
     } finally {
@@ -89,8 +110,107 @@ export default function AdminSecurity() {
     }
   }
 
+  async function loadJoinCode() {
+    try {
+      const { data } = await supabase.rpc('list_my_organisations');
+      if (data) {
+        const currentOrgData = data.find((o: any) => o.org_id === orgId);
+        setJoinCode(currentOrgData?.join_code || null);
+      }
+    } catch {
+      // Non-critical — join code just won't show
+    }
+  }
+
+  async function handleGenerateJoinCode() {
+    if (!orgId) {
+      setInviteError('No organisation selected');
+      return;
+    }
+    setGeneratingCode(true);
+    setInviteError('');
+    setInviteSuccess('');
+    try {
+      console.log('[Security] Generating join code for org:', orgId);
+      const { data: code, error } = await supabase.rpc('generate_join_code', {
+        p_org_id: orgId
+      });
+      console.log('[Security] generate_join_code result:', { code, error });
+      if (error) throw error;
+
+      // Set the code directly from the RPC response
+      if (code) {
+        setJoinCode(code);
+        setInviteSuccess('Join code generated! Share it with team members.');
+        setTimeout(() => setInviteSuccess(''), 4000);
+      } else {
+        // Fallback: reload from list_my_organisations
+        await loadJoinCode();
+        if (!joinCode) {
+          setInviteError('Code was generated but could not be retrieved. Please refresh the page.');
+        } else {
+          setInviteSuccess('Join code generated!');
+          setTimeout(() => setInviteSuccess(''), 4000);
+        }
+      }
+    } catch (error: any) {
+      console.error('[Security] generate_join_code error:', error);
+      const msg = error.message || 'Failed to generate join code';
+      setInviteError(msg);
+      // Don't auto-clear errors — let the user see them
+    } finally {
+      setGeneratingCode(false);
+    }
+  }
+
+  function handleCopyCode() {
+    if (!joinCode) return;
+    navigator.clipboard.writeText(joinCode);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  }
+
+  async function handleRemoveMember(memberId: string, memberUserId: string) {
+    if (!profile) return;
+    if (memberUserId === profile.id) {
+      alert('You cannot remove yourself from the organisation.');
+      return;
+    }
+    const confirmed = await confirmDialog({ title: 'Remove member?', message: 'They will lose access to all projects in this organisation.' });
+    if (!confirmed) return;
+
+    try {
+      const oldMember = members.find(m => m.id === memberId);
+
+      const { error } = await supabase
+        .from('organisation_members')
+        .delete()
+        .eq('id', memberId);
+
+      if (error) throw error;
+
+      // Audit: organisation_members not in AuditEntityType — log directly
+      await supabase.from('audit_events').insert({
+        org_id: orgId!,
+        project_id: null,
+        user_id: profile.id,
+        entity_type: 'organisation_members',
+        entity_id: memberId,
+        action: 'delete',
+        diff_json: { before: { role: oldMember?.role, user_id: memberUserId } },
+        timestamp: new Date().toISOString(),
+      });
+
+      await loadMembers();
+      alert('Member removed successfully');
+    } catch (error: any) {
+      console.error('Error removing member:', error);
+      alert('Failed to remove member: ' + error.message);
+    }
+  }
+
   async function loadMembers() {
-    if (!profile?.org_id) return;
+    if (!orgId) return;
 
     const { data: membersData } = await supabase
       .from('organisation_members')
@@ -98,7 +218,7 @@ export default function AdminSecurity() {
         *,
         user:users!organisation_members_user_id_fkey(name, email)
       `)
-      .eq('org_id', profile.org_id)
+      .eq('org_id', orgId!)
       .order('created_at', { ascending: false });
 
     if (membersData) {
@@ -108,7 +228,7 @@ export default function AdminSecurity() {
             .from('user_last_seen')
             .select('last_seen_at')
             .eq('user_id', member.user_id)
-            .eq('org_id', profile.org_id!)
+            .eq('org_id', orgId!)
             .single();
 
           const { count } = await supabase
@@ -129,7 +249,7 @@ export default function AdminSecurity() {
   }
 
   async function loadAuditEvents() {
-    if (!profile?.org_id) return;
+    if (!orgId) return;
 
     let query = supabase
       .from('audit_events')
@@ -137,7 +257,7 @@ export default function AdminSecurity() {
         *,
         user:users!audit_events_user_id_fkey(name, email)
       `)
-      .eq('org_id', profile.org_id)
+      .eq('org_id', orgId!)
       .gte('timestamp', new Date(auditFilters.startDate).toISOString())
       .lte('timestamp', new Date(auditFilters.endDate + 'T23:59:59').toISOString())
       .order('timestamp', { ascending: false })
@@ -160,7 +280,7 @@ export default function AdminSecurity() {
   }
 
   async function loadDataCounts() {
-    if (!profile?.org_id) return;
+    if (!orgId) return;
 
     const counts: Record<string, number> = {};
 
@@ -180,7 +300,7 @@ export default function AdminSecurity() {
         const { count } = await supabase
           .from(table)
           .select('*', { count: 'exact', head: true })
-          .eq('org_id', profile.org_id!);
+          .eq('org_id', orgId!);
 
         counts[table] = count || 0;
       })
@@ -192,7 +312,7 @@ export default function AdminSecurity() {
   async function handleRoleChange(memberId: string, userId: string, newRole: string) {
     if (!profile) return;
 
-    const confirmed = confirm(`Change this member's role to ${newRole}?`);
+    const confirmed = await confirmDialog({ title: 'Change role?', message: `This member's role will be changed to ${newRole}.`, variant: 'warning', confirmLabel: 'Change Role' });
     if (!confirmed) return;
 
     try {
@@ -206,7 +326,7 @@ export default function AdminSecurity() {
       if (error) throw error;
 
       await logAuditEvent(
-        profile.org_id!,
+        orgId!,
         null,
         profile.id,
         'organisation_members',
@@ -225,7 +345,7 @@ export default function AdminSecurity() {
   }
 
   async function handleExportAudit() {
-    if (!profile?.org_id) return;
+    if (!orgId) return;
 
     try {
       const { data } = await supabase
@@ -237,7 +357,7 @@ export default function AdminSecurity() {
           user:users!audit_events_user_id_fkey(name, email),
           diff_json
         `)
-        .eq('org_id', profile.org_id)
+        .eq('org_id', orgId!)
         .gte('timestamp', new Date(auditFilters.startDate).toISOString())
         .lte('timestamp', new Date(auditFilters.endDate + 'T23:59:59').toISOString())
         .order('timestamp', { ascending: false });
@@ -271,9 +391,9 @@ export default function AdminSecurity() {
       URL.revokeObjectURL(url);
 
       await logAuditEvent(
-        profile.org_id!,
+        orgId!,
         null,
-        profile.id,
+        profile!.id,
         'audit_export',
         '',
         'create',
@@ -289,7 +409,7 @@ export default function AdminSecurity() {
   }
 
   async function handleExportDataIndex() {
-    if (!profile?.org_id) return;
+    if (!orgId) return;
 
     try {
       const csv = [
@@ -312,7 +432,7 @@ export default function AdminSecurity() {
     }
   }
 
-  if (!isOrgAdmin) {
+  if (!isAdmin) {
     return (
       <div className="max-w-2xl mx-auto py-12">
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-6 flex items-center gap-3">
@@ -378,7 +498,102 @@ export default function AdminSecurity() {
 
       {/* Access & Roles Tab */}
       {activeTab === 'access' && (
-        <div className="bg-white rounded-lg shadow">
+        <div className="space-y-4">
+          {/* ─── Invite Members Card ─── */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-blue-600" />
+                <h2 className="text-lg font-semibold text-slate-900">Invite Members</h2>
+              </div>
+              {entitlements?.max_members !== null && entitlements?.max_members !== undefined && (
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                  members.length >= (entitlements.max_members ?? Infinity)
+                    ? 'bg-red-100 text-red-700'
+                    : members.length >= (entitlements.max_members ?? Infinity) * 0.8
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {members.length} / {entitlements.max_members} seats used
+                </span>
+              )}
+            </div>
+
+            {members.length >= (entitlements?.max_members ?? Infinity) && entitlements?.max_members !== null && (
+              <div className="mb-3 bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg px-3 py-2 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                Seat limit reached ({entitlements?.max_members}). New members won&apos;t be able to join until you upgrade or remove existing members.
+              </div>
+            )}
+
+            {inviteError && (
+              <div className="mb-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
+                {inviteError}
+              </div>
+            )}
+            {inviteSuccess && (
+              <div className="mb-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-3 py-2 flex items-center gap-2">
+                <Check className="h-4 w-4 flex-shrink-0" />
+                {inviteSuccess}
+              </div>
+            )}
+
+            {joinCode ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600">
+                  Share this join code with people you want to invite. They can enter it on their <strong>Profile</strong> page under "Join Organisation".
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 bg-white border border-blue-300 rounded-lg px-4 py-2.5">
+                    <Key className="h-4 w-4 text-blue-500" />
+                    <code className="text-lg font-mono font-bold tracking-wider text-slate-900">{joinCode}</code>
+                  </div>
+                  <button
+                    onClick={handleCopyCode}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
+                    {copiedCode ? (
+                      <><Check className="h-4 w-4" /> Copied!</>
+                    ) : (
+                      <><Copy className="h-4 w-4" /> Copy Code</>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleGenerateJoinCode}
+                    disabled={generatingCode}
+                    className="flex items-center gap-1.5 px-3 py-2.5 border border-slate-300 text-slate-600 rounded-lg hover:bg-white transition-colors text-sm disabled:opacity-50"
+                    title="Generate a new code (old one will stop working)"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${generatingCode ? 'animate-spin' : ''}`} />
+                    New Code
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Generating a new code will invalidate the previous one.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600">
+                  Generate a join code to invite new members. They'll use this code on their Profile page to join your organisation.
+                </p>
+                <button
+                  onClick={handleGenerateJoinCode}
+                  disabled={generatingCode}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
+                >
+                  {generatingCode ? (
+                    <><RefreshCw className="h-4 w-4 animate-spin" /> Generating...</>
+                  ) : (
+                    <><Key className="h-4 w-4" /> Generate Join Code</>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ─── Members Table ─── */}
+          <div className="bg-white rounded-lg shadow">
           <div className="p-6 border-b">
             <h2 className="text-lg font-semibold text-slate-900">Organisation Members</h2>
             <p className="text-sm text-slate-600 mt-1">
@@ -432,15 +647,26 @@ export default function AdminSecurity() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      {member.user_id !== profile?.id && (
-                        <select
-                          value={member.role}
-                          onChange={(e) => handleRoleChange(member.id, member.user_id, e.target.value)}
-                          className="text-sm border rounded px-2 py-1"
-                        >
-                          <option value="member">Member</option>
-                          <option value="admin">Admin</option>
-                        </select>
+                      {member.user_id !== profile?.id ? (
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={member.role}
+                            onChange={(e) => handleRoleChange(member.id, member.user_id, e.target.value)}
+                            className="text-sm border rounded px-2 py-1"
+                          >
+                            <option value="member">Member</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          <button
+                            onClick={() => handleRemoveMember(member.id, member.user_id)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Remove member"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">You</span>
                       )}
                     </td>
                   </tr>
@@ -448,6 +674,7 @@ export default function AdminSecurity() {
               </tbody>
             </table>
           </div>
+        </div>
         </div>
       )}
 
@@ -673,6 +900,7 @@ export default function AdminSecurity() {
           </div>
         </div>
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

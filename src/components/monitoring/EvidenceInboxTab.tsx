@@ -278,7 +278,7 @@ export default function EvidenceInboxTab({
                       }}
                       className="rounded text-blue-600 focus:ring-2 focus:ring-blue-500"
                     />
-                    <span className="text-sm text-gray-900">{indicator.name}</span>
+                    <span className="text-sm text-gray-900">{indicator.title}</span>
                   </label>
                 ))}
               </div>

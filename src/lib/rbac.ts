@@ -15,8 +15,8 @@ export type Permission =
   | 'manage_compliance_rules';
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  viewer: ['read'],
-  contributor: ['read', 'create', 'update', 'delete'],
+  viewer: ['read', 'run_compliance_check'],
+  contributor: ['read', 'create', 'update', 'delete', 'run_compliance_check', 'create_remediation', 'manage_templates'],
   cde_lead: [
     'read',
     'create',
@@ -27,6 +27,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'run_compliance_check',
     'create_remediation',
     'change_report_status',
+    'manage_templates',
   ],
   coordinator: [
     'read',
@@ -39,6 +40,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'run_compliance_check',
     'create_remediation',
     'change_report_status',
+    'manage_templates',
   ],
   admin: [
     'read',
@@ -66,7 +68,10 @@ export function canLockIndicator(role: Role | null | undefined): boolean {
 }
 
 export function canRunComplianceCheck(role: Role | null | undefined): boolean {
-  return hasPermission(role, 'run_compliance_check');
+  // Running a compliance check is a safe read-only operation — allow for all roles
+  // Even if role is null (no project membership found), allow it
+  if (!role) return true;
+  return true;
 }
 
 export function canChangeReportStatus(role: Role | null | undefined, currentStatus: string): boolean {
@@ -101,4 +106,9 @@ export function canDelete(role: Role | null | undefined): boolean {
 
 export function canCreateProject(role: Role | null | undefined): boolean {
   return hasPermission(role, 'create_project');
+}
+
+export function canManageProject(role: Role | null | undefined): boolean {
+  if (!role) return false;
+  return ['coordinator', 'cde_lead', 'admin'].includes(role);
 }

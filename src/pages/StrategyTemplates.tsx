@@ -1,18 +1,33 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Edit, Copy, Archive, AlertCircle } from 'lucide-react';
 import { templateService, type CDEStrategyTemplate } from '../lib/templateService';
 import { useOrganisation } from '../contexts/OrganisationContext';
-import { useEntitlements } from '../contexts/EntitlementsContext';
+import { ConfirmDialog } from '../components/ui';
+import useConfirm from '../hooks/useConfirm';
+
 import TemplateEditor from '../components/strategy/TemplateEditor';
 
 export default function StrategyTemplates() {
   const { currentOrg } = useOrganisation();
-  const { isOrgAdmin } = useEntitlements();
+  const [confirmProps, confirmDialog] = useConfirm();
+
+  const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState<CDEStrategyTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | undefined>();
+
+  // Auto-open editor when navigated with ?create=true
+  useEffect(() => {
+    if (searchParams.get('create') === 'true') {
+      setEditingTemplateId(undefined);
+      setShowEditor(true);
+      // Clear the param so back-nav doesn't re-trigger
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (currentOrg?.id) {
@@ -50,7 +65,8 @@ export default function StrategyTemplates() {
   };
 
   const handleDuplicate = async (template: CDEStrategyTemplate) => {
-    if (!confirm(`Duplicate template "${template.name}"?`)) return;
+    const ok = await confirmDialog({ title: 'Duplicate template?', message: `Create a copy of "${template.name}"?`, variant: 'info', confirmLabel: 'Duplicate' });
+    if (!ok) return;
 
     try {
       await templateService.duplicateTemplate(template.template_id, `${template.name} (Copy)`);
@@ -62,7 +78,8 @@ export default function StrategyTemplates() {
   };
 
   const handleArchive = async (template: CDEStrategyTemplate) => {
-    if (!confirm(`Archive template "${template.name}"? This will hide it from project teams.`)) return;
+    const ok = await confirmDialog({ title: 'Archive template?', message: `"${template.name}" will be hidden from project teams.`, variant: 'warning', confirmLabel: 'Archive' });
+    if (!ok) return;
 
     try {
       await templateService.archiveTemplate(template.template_id);
@@ -83,18 +100,6 @@ export default function StrategyTemplates() {
           setShowEditor(false);
         }}
       />
-    );
-  }
-
-  if (!isOrgAdmin) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <AlertCircle className="w-16 h-16 text-yellow-600 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Admin Access Required</h2>
-          <p className="text-gray-600">Only organisation admins can manage strategy templates.</p>
-        </div>
-      </div>
     );
   }
 
@@ -213,6 +218,7 @@ export default function StrategyTemplates() {
           })}
         </div>
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

@@ -13,11 +13,14 @@ import {
   validateSettings,
 } from '../lib/decisionSupportTypes';
 import { logAuditEvent } from '../lib/audit';
+import { ConfirmDialog } from '../components/ui';
+import useConfirm from '../hooks/useConfirm';
 
 export default function ProjectSettings() {
   const { currentProject } = useProject();
   const { profile } = useAuth();
   const permissions = usePermissions();
+  const [confirmProps, confirmDialog] = useConfirm();
   const [activeTab, setActiveTab] = useState<'decision_support' | 'methodology'>('decision_support');
 
   const [settings, setSettings] = useState<DecisionSupportSettings>(DEFAULT_DECISION_SUPPORT_SETTINGS);
@@ -165,7 +168,7 @@ export default function ProjectSettings() {
   async function approveMethodology(methodologyId: string) {
     if (!currentProject || !profile) return;
 
-    const confirmed = confirm('Approve this methodology version?');
+    const confirmed = await confirmDialog({ title: 'Approve methodology?', message: 'This will mark the methodology version as approved.', variant: 'info', confirmLabel: 'Approve' });
     if (!confirmed) return;
 
     setSaving(true);
@@ -650,6 +653,7 @@ export default function ProjectSettings() {
           </div>
         </div>
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
 export interface ObjectiveLibrary {
-  objective_lib_id: string;
+  id: string;
   code: string;
   title: string;
   description: string;
@@ -73,7 +73,7 @@ export class ObjectiveLibraryService {
     const { data, error } = await supabase
       .from('objective_library')
       .select('*')
-      .eq('objective_lib_id', objectiveLibId)
+      .eq('id', objectiveLibId)
       .eq('is_active', true)
       .maybeSingle();
 

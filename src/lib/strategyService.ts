@@ -65,30 +65,53 @@ export interface CDEStrategyGeneratedItem {
 
 export class StrategyService {
   static async getOrCreateStrategy(projectId: string): Promise<CDEStrategy> {
+    // First try to fetch existing strategy
     const { data: existing, error: fetchError } = await supabase
       .from('cde_strategies')
       .select('*')
       .eq('project_id', projectId)
       .maybeSingle();
 
-    if (fetchError) throw fetchError;
     if (existing) return existing;
 
-    const { data: newStrategy, error: createError } = await supabase
-      .from('cde_strategies')
-      .insert({
-        project_id: projectId,
-        status: 'draft',
-        focus_json: {},
-        cadence_json: {},
-        roles_json: {}
-      })
-      .select()
-      .single();
+    // If fetch failed (e.g. RLS), try insert with conflict handling
+    try {
+      const { data: newStrategy, error: createError } = await supabase
+        .from('cde_strategies')
+        .upsert({
+          project_id: projectId,
+          status: 'draft',
+          focus_json: {},
+          cadence_json: {},
+          roles_json: {}
+        }, { onConflict: 'project_id', ignoreDuplicates: true })
+        .select()
+        .single();
 
-    if (createError) throw createError;
+      if (createError) {
+        // If upsert also fails, try one more fetch
+        const { data: retry, error: retryError } = await supabase
+          .from('cde_strategies')
+          .select('*')
+          .eq('project_id', projectId)
+          .maybeSingle();
+        if (retry) return retry;
+        throw createError;
+      }
 
-    return newStrategy;
+      return newStrategy;
+    } catch (err: any) {
+      // Handle duplicate key gracefully - strategy already exists
+      if (err?.code === '23505' || err?.message?.includes('duplicate key')) {
+        const { data: retry } = await supabase
+          .from('cde_strategies')
+          .select('*')
+          .eq('project_id', projectId)
+          .maybeSingle();
+        if (retry) return retry;
+      }
+      throw err;
+    }
   }
 
   static async updateStrategy(
@@ -379,7 +402,7 @@ export class StrategyService {
 
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
-        <h1 style="color: #1e40af; border-bottom: 3px solid #1e40af; padding-bottom: 10px;">
+        <h1 style="color: #14261C; border-bottom: 3px solid #1BAE70; padding-bottom: 10px;">
           CDE Strategy Summary
         </h1>
 
@@ -390,7 +413,7 @@ export class StrategyService {
           <p><strong>Status:</strong> ${strategy.status.replace(/_/g, ' ').toUpperCase()}</p>
         </div>
 
-        <h2 style="color: #1e40af; margin-top: 30px;">Strategic Focus</h2>
+        <h2 style="color: #06752E; margin-top: 30px;">Strategic Focus</h2>
         <div style="margin-bottom: 20px;">
           ${strategy.focus_json.emphasis ? `
             <p><strong>Emphasis:</strong> ${strategy.focus_json.emphasis.join(', ')}</p>
@@ -403,7 +426,7 @@ export class StrategyService {
           ` : ''}
         </div>
 
-        <h2 style="color: #1e40af; margin-top: 30px;">Objectives</h2>
+        <h2 style="color: #06752E; margin-top: 30px;">Objectives</h2>
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
           <thead>
             <tr style="background: #e5e7eb;">
@@ -433,7 +456,7 @@ export class StrategyService {
           </tbody>
         </table>
 
-        <h2 style="color: #1e40af; margin-top: 30px;">Channel Plan</h2>
+        <h2 style="color: #06752E; margin-top: 30px;">Channel Plan</h2>
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
           <thead>
             <tr style="background: #e5e7eb;">
@@ -462,8 +485,8 @@ export class StrategyService {
           </tbody>
         </table>
 
-        <div style="margin-top: 30px; padding: 15px; background: #eff6ff; border-left: 4px solid #1e40af; border-radius: 4px;">
-          <p style="margin: 0; color: #1e40af; font-size: 14px;">
+        <div style="margin-top: 30px; padding: 15px; background: #f2faf6; border-left: 4px solid #1BAE70; border-radius: 4px;">
+          <p style="margin: 0; color: #06752E; font-size: 14px;">
             <strong>Generated on:</strong> ${new Date().toLocaleDateString()} |
             <strong>Objectives:</strong> ${objectives.length} |
             <strong>Channels:</strong> ${channels.length}

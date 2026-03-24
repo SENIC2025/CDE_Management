@@ -413,8 +413,8 @@ For questions about this export, contact your CDE Manager administrator.
       padding: 20px;
       color: #333;
     }
-    h1 { color: #2563eb; border-bottom: 3px solid #2563eb; padding-bottom: 10px; }
-    h2 { color: #1e40af; margin-top: 30px; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; }
+    h1 { color: #14261C; border-bottom: 3px solid #1BAE70; padding-bottom: 10px; }
+    h2 { color: #06752E; margin-top: 30px; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; }
     h3 { color: #475569; }
     .summary-grid {
       display: grid;
@@ -627,9 +627,8 @@ For questions about this export, contact your CDE Manager administrator.
         .sort((a, b) => new Date(b.checked_at).getTime() - new Date(a.checked_at).getTime())[0];
 
       const projectFlags = flags.filter((f) => f.project_id === project.id);
-      const highIssues =
-        projectCompliance?.issues_json?.filter((i: any) => i.severity === 'high' || i.severity === 'critical')
-          .length || 0;
+      const issuesArr = Array.isArray(projectCompliance?.issues_json) ? projectCompliance.issues_json : [];
+      const highIssues = issuesArr.filter((i: any) => i.severity === 'high' || i.severity === 'critical').length;
 
       const riskLevel =
         highIssues > 3 || projectFlags.length > 5

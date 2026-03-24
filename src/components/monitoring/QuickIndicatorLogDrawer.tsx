@@ -180,14 +180,13 @@ export default function QuickIndicatorLogDrawer({
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="font-semibold text-gray-900 mb-2">{indicator.name}</div>
+            <div className="font-semibold text-gray-900 mb-2">{indicator.title}</div>
             {indicator.description && (
               <p className="text-sm text-gray-600 mb-2">{indicator.description}</p>
             )}
             <div className="text-sm text-gray-600">
-              <span className="font-medium">Unit:</span> {indicator.unit} |
-              <span className="font-medium ml-2">Baseline:</span> {indicator.baseline} |
-              <span className="font-medium ml-2">Target:</span> {indicator.target}
+              <span className="font-medium">Unit:</span> {indicator.measurement_unit} |
+              <span className="font-medium ml-2">Target:</span> {indicator.target_value}
             </div>
           </div>
 
@@ -207,7 +206,7 @@ export default function QuickIndicatorLogDrawer({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder={`Enter value in ${indicator.unit}`}
+              placeholder={`Enter value in ${indicator.measurement_unit}`}
             />
           </div>
 

@@ -30,8 +30,11 @@ import PlatformAdmin from './pages/PlatformAdmin';
 import PlatformAdminPolicy from './pages/PlatformAdminPolicy';
 import Profile from './pages/Profile';
 import IndicatorLibrary from './pages/IndicatorLibrary';
+import ObjectiveLibrary from './pages/ObjectiveLibrary';
 import Strategy from './pages/Strategy';
 import StrategyTemplates from './pages/StrategyTemplates';
+import SharedView from './pages/SharedView';
+import ResetPassword from './pages/ResetPassword';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -55,6 +58,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/share/:token" element={<SharedView />} />
       <Route
         path="/"
         element={
@@ -318,6 +323,18 @@ function AppRoutes() {
             <RequireOrg>
               <Layout>
                 <IndicatorLibrary />
+              </Layout>
+            </RequireOrg>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/objective-library"
+        element={
+          <ProtectedRoute>
+            <RequireOrg>
+              <Layout>
+                <ObjectiveLibrary />
               </Layout>
             </RequireOrg>
           </ProtectedRoute>

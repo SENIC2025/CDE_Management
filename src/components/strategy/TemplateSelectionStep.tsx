@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Check, Eye, Settings, AlertCircle } from 'lucide-react';
+import { Check, Eye, Settings, AlertCircle, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { STRATEGY_TEMPLATES, type StrategyTemplate } from '../../lib/strategyTemplates';
 import { strategyService, type CDEStrategy } from '../../lib/strategyService';
 import { templateService, type CDEStrategyTemplate, type ApplyMode } from '../../lib/templateService';
 import { useOrganisation } from '../../contexts/OrganisationContext';
-import { useEntitlements } from '../../contexts/EntitlementsContext';
+// permissions enforced server-side via RLS
 
 interface TemplateSelectionStepProps {
   strategy: CDEStrategy;
@@ -18,7 +18,7 @@ type TabType = 'system' | 'organisation';
 export default function TemplateSelectionStep({ strategy, projectId, onUpdate }: TemplateSelectionStepProps) {
   const navigate = useNavigate();
   const { currentOrg } = useOrganisation();
-  const { isOrgAdmin } = useEntitlements();
+
   const [activeTab, setActiveTab] = useState<TabType>('system');
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(strategy.template_code);
   const [previewTemplate, setPreviewTemplate] = useState<StrategyTemplate | null>(null);
@@ -142,14 +142,23 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
           </button>
         </div>
 
-        {activeTab === 'organisation' && isOrgAdmin && (
-          <button
-            onClick={() => navigate('/strategy/templates')}
-            className="flex items-center space-x-2 px-4 py-2 text-sm text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
-          >
-            <Settings className="w-4 h-4" />
-            <span>Manage Templates</span>
-          </button>
+        {activeTab === 'organisation' && (
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => navigate('/strategy/templates?create=true')}
+              className="flex items-center space-x-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create Template</span>
+            </button>
+            <button
+              onClick={() => navigate('/strategy/templates')}
+              className="flex items-center space-x-2 px-4 py-2 text-sm text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Manage Templates</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -241,15 +250,13 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
           ) : orgTemplates.length === 0 ? (
             <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
               <p className="text-gray-500 mb-4">No organisation templates available yet.</p>
-              {isOrgAdmin && (
-                <button
-                  onClick={() => navigate('/strategy/templates')}
-                  className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  <Settings className="w-4 h-4" />
-                  <span>Create Template</span>
-                </button>
-              )}
+              <button
+                onClick={() => navigate('/strategy/templates?create=true')}
+                className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Template</span>
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -299,7 +306,7 @@ export default function TemplateSelectionStep({ strategy, projectId, onUpdate }:
           <div className="flex items-center space-x-2">
             <Check className="w-5 h-5 text-green-600" />
             <span className="text-green-800 font-medium">
-              Template applied: {STRATEGY_TEMPLATES.find(t => t.template_code === strategy.template_code)?.name}
+              Template applied: {STRATEGY_TEMPLATES.find(t => t.template_code === strategy.template_code)?.name || strategy.template_code}
             </span>
           </div>
           <p className="text-sm text-green-700 mt-2">

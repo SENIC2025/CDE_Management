@@ -13,6 +13,7 @@ export default function Login() {
   const [name, setName] = useState('');
   const [orgName, setOrgName] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const { signIn, signUp, resetPasswordForEmail } = useAuth();
@@ -38,7 +39,15 @@ export default function Login() {
         navigate('/');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      // Show email confirmation messages as info, not errors
+      if (message.toLowerCase().includes('check your email') || message.toLowerCase().includes('confirm')) {
+        setInfo(message);
+        setError('');
+      } else {
+        setError(message);
+        setInfo('');
+      }
     } finally {
       setLoading(false);
     }
@@ -47,6 +56,7 @@ export default function Login() {
   function switchView(newView: ViewMode) {
     setView(newView);
     setError('');
+    setInfo('');
     setResetSent(false);
   }
 
@@ -243,6 +253,13 @@ export default function Login() {
                       placeholder="Min. 6 characters"
                       className={inputClass}
                     />
+                  </div>
+                )}
+
+                {info && (
+                  <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+                    <Mail size={16} className="flex-shrink-0 mt-0.5" />
+                    <span>{info}</span>
                   </div>
                 )}
 

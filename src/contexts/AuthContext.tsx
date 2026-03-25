@@ -108,34 +108,80 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signIn(email: string, password: string) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    // After sign in, load the profile
+
     if (data.user) {
+      // Load the profile first
       await loadProfile(data.user.id);
+
+      // If user has no org yet (e.g., signed up with email confirmation),
+      // try to create one from the org_name stored in user metadata
+      const currentProfile = await supabase
+        .from('users')
+        .select('org_id')
+        .eq('auth_id', data.user.id)
+        .maybeSingle();
+
+      if (currentProfile.data && !currentProfile.data.org_id) {
+        const orgName = data.user.user_metadata?.org_name;
+        if (orgName) {
+          console.log('[AuthContext] First sign-in after confirmation — creating org:', orgName);
+          try {
+            await supabase.rpc('create_organisation', { p_name: orgName });
+            // Reload profile to pick up the new org_id
+            await loadProfile(data.user.id);
+          } catch (err) {
+            console.error('[AuthContext] Error creating org on first sign-in:', err);
+          }
+        }
+      }
     }
   }
 
   async function signUp(email: string, password: string, name: string, orgName: string) {
+    // Pass name in user_metadata so the DB trigger (handle_new_auth_user)
+    // can read it via raw_user_meta_data->>'name' and set full_name correctly
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: { name, org_name: orgName },
+      },
     });
 
     if (authError) throw authError;
     if (!authData.user) throw new Error('Sign up failed');
 
-    // Use RPC to create org (bypasses RLS on organisations table)
-    try {
-      const { data: orgId, error: orgError } = await supabase.rpc('create_organisation', {
-        p_name: orgName
-      });
+    // Check if we got a session — if email confirmation is required,
+    // session will be null and we can't call RPC yet
+    const hasSession = !!authData.session;
+    console.log('[AuthContext] Sign up complete. Has session:', hasSession, 'User:', authData.user.id);
 
-      if (orgError) {
-        console.error('[AuthContext] Error creating org via RPC:', orgError);
-        // Don't throw - user can set up org later via WorkspaceRecovery
+    if (hasSession) {
+      // User is fully authenticated — create org and load profile now
+      try {
+        const { data: orgId, error: orgError } = await supabase.rpc('create_organisation', {
+          p_name: orgName
+        });
+
+        if (orgError) {
+          console.error('[AuthContext] Error creating org via RPC:', orgError);
+          // Don't throw - user can set up org later via WorkspaceRecovery
+        } else {
+          console.log('[AuthContext] Organisation created:', orgId);
+        }
+      } catch (err) {
+        console.error('[AuthContext] Exception creating org:', err);
+        // Don't throw - user can set up org later
       }
-    } catch (err) {
-      console.error('[AuthContext] Exception creating org:', err);
-      // Don't throw - user can set up org later
+
+      // Load the profile so the app has the user's data immediately
+      await loadProfile(authData.user.id);
+    } else {
+      // Email confirmation required — org will be created when they confirm
+      // and sign in for the first time. Store orgName in metadata so we can
+      // retrieve it later.
+      console.log('[AuthContext] Email confirmation required. Org will be created on first sign-in.');
+      throw new Error('Please check your email to confirm your account before signing in.');
     }
   }
 
